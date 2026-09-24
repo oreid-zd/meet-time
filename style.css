@@ -1,0 +1,64 @@
+:root {
+  color-scheme: light;
+  --ink: #243c35;
+  --muted: #66756e;
+  --green: #235046;
+  --line: #dfe5dc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: #f7f8f4;
+  font-synthesis: none;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select { font: inherit; }
+button, select { cursor: pointer; }
+[hidden] { display: none !important; }
+.page { max-width: 620px; padding: 0 24px; margin: 40px auto; }
+.brand { display: inline-flex; align-items: center; gap: 7px; color: var(--green); text-decoration: none; font-size: 21px; font-weight: 700; letter-spacing: -.7px; }
+.brand svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.intro { margin: 32px 0 24px; }
+h1 { font-size: 32px; font-weight: 650; letter-spacing: -.8px; margin: 0 0 10px; }
+.intro p { color: var(--muted); font-size: 15px; line-height: 1.6; margin: 0; }
+.meeting { background: #fff; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.meeting > * + * { border-top: 1px solid var(--line); }
+.editor, .preview { padding: 24px; }
+h2 { font-size: 15px; font-weight: 650; margin: 0; }
+.editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+#hour-format { width: auto; font-size: 13px; }
+fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
+.date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 16px; }
+.field { margin-top: 18px; }
+label { display: block; margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+input, select { min-width: 0; width: 100%; height: 44px; border: 1px solid #ced8cf; border-radius: 7px; background: #fff; color: var(--ink); padding: 0 10px; font-size: 16px; }
+input[type="date"] { appearance: none; text-align: left; }
+input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+select { padding-right: 6px; }
+input:hover, select:hover { border-color: #8b9e8e; }
+:focus-visible { outline: 3px solid #618847; outline-offset: 3px; }
+.time-inputs { display: grid; grid-template-columns: minmax(0, 1fr) 8px minmax(0, 1fr) minmax(0, 1.4fr); align-items: center; gap: 8px; text-align: center; }
+.time-inputs:has(#period[hidden]) { grid-template-columns: minmax(0, 1fr) 8px minmax(0, 1fr); }
+.field-hint { margin: 9px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.preview { background: #eef3ec; }
+.preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.preview h2 { color: var(--green); }
+.local-time { display: block; margin-top: 14px; font-size: 48px; font-weight: 500; letter-spacing: -1.5px; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.local-date { margin: 8px 0 4px; font-size: 16px; line-height: 1.5; }
+.local-zone { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid var(--green); border-radius: 7px; background: var(--green); color: #fff; padding: 0 13px; min-height: 44px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+button:hover { background: #173d34; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button svg { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.copy-status { font-size: 13px; line-height: 1.5; margin: 12px 0 0; color: var(--green); }
+.copy-status:empty { margin: 0; }
+#share-url { text-overflow: ellipsis; font-size: 16px; }
+.error { padding: 14px 18px; background: #fff0e9; border: 1px solid #ddaa90; color: #803a20; border-radius: 10px; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+@media (max-width: 480px) {
+  .page { padding: 0 16px; margin: 24px auto; }
+  .intro { margin-top: 24px; }
+  h1 { font-size: 28px; }
+  .editor, .preview { padding: 20px; }
+  .date-time { grid-template-columns: 1fr; gap: 18px; }
+  .time-inputs { gap: 6px; }
+  .local-time { font-size: 44px; }
+}

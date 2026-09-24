@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f4">
+  <meta name="description" content="Choose a meeting time and share the link. Anyone who opens it sees the time in their own timezone.">
+  <title>Meettime: share a time</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23235046'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%23e4f2bc' stroke-width='4'/%3E%3Cpath d='M32 19v14l9 5' fill='none' stroke='%23e4f2bc' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <a class="brand" href="./" aria-label="Meettime home">
+        <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="12"/><path d="M16 8v9l6 3"/></svg>
+        meettime
+      </a>
+    </header>
+    <main>
+      <div class="intro">
+        <h1>Share a time</h1>
+        <p>Choose a time and copy the link.<br>Everyone sees it in their own timezone.</p>
+      </div>
+      <noscript><p class="error">Enable JavaScript to convert timezones and create a link.</p></noscript>
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div id="meeting" class="meeting">
+        <section id="editor" class="editor" aria-labelledby="editor-heading">
+          <form id="meeting-form">
+            <fieldset id="fields" disabled>
+              <div class="editor-heading">
+                <h2 id="editor-heading">Meeting time</h2>
+                <select id="hour-format" name="hour-format" aria-label="Time format">
+                  <option value="24">24-hour</option>
+                  <option value="12">12-hour</option>
+                </select>
+              </div>
+              <div class="date-time">
+                <div>
+                  <label for="date">Date</label>
+                  <input id="date" name="date" type="date" min="0001-01-01" max="9999-12-31" required>
+                </div>
+                <div>
+                  <label for="hour">Time</label>
+                  <div class="time-inputs">
+                    <select id="hour" name="hour" aria-label="Hour" required></select>
+                    <span aria-hidden="true">:</span>
+                    <select id="minute" name="minute" aria-label="Minute" required></select>
+                    <select id="period" name="period" aria-label="AM or PM" hidden></select>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label for="timezone">Timezone</label>
+                <select id="timezone" name="timezone" required></select>
+              </div>
+              <div id="occurrence-field" class="field" hidden>
+                <label for="occurrence">Which time?</label>
+                <select id="occurrence" name="occurrence" aria-describedby="occurrence-hint"></select>
+                <p id="occurrence-hint" class="field-hint">The clocks go back on this date, so this time happens twice.</p>
+              </div>
+            </fieldset>
+          </form>
+        </section>
+
+        <section id="preview" class="preview" aria-labelledby="preview-heading">
+          <div class="preview-heading">
+            <h2 id="preview-heading">Your local time</h2>
+            <button id="copy" type="button" disabled>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/></svg>
+              <span id="copy-label" aria-live="polite">Copy link</span>
+            </button>
+          </div>
+          <div id="result" aria-live="polite" aria-atomic="true">
+            <time id="local-time" class="local-time">--:--</time>
+            <p id="local-date" class="local-date">Choose a meeting time</p>
+            <p id="local-zone" class="local-zone">Your device's timezone</p>
+          </div>
+          <p id="copy-status" class="copy-status" role="status"></p>
+          <div id="copy-fallback" class="field" hidden>
+            <label for="share-url">Copy this link</label>
+            <input id="share-url" type="text" readonly spellcheck="false">
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

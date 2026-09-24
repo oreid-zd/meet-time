@@ -4,7 +4,9 @@
 
 Choose a date, time, and timezone, then press **Copy link** to share a meeting time. Anyone opening the link sees their local time first and can edit the meeting details below.
 
-The site runs in your browser. You don't need an account or a backend, and there are no dependencies, external assets, or build steps.
+The site runs in your browser. You don't need an account, backend, or build step. All assets come from this repository; the site makes no CDN or search API requests.
+
+You can search the timezone and minute menus. Timezones are grouped by region, with your device's timezone first. Minutes start with `00`, `15`, `30`, and `45`, followed by every other minute. The date picker and short hour/AM-PM lists use native browser controls.
 
 ## Run locally
 
@@ -49,3 +51,22 @@ node time.test.mjs
 ```
 
 Checks include winter/summer offsets, skipped and repeated times, half-hour DST changes, quarter-hour offsets, a skipped calendar day, historical second-based offsets, date rollover, invalid links, restoring both hour formats from a URL, and the default format for older links.
+
+## Browser checks
+
+With Google Chrome installed, install Playwright for local testing only:
+
+```sh
+npm install --no-save --package-lock=false playwright
+node browser.test.mjs
+```
+
+If you already have Playwright installed elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs` path instead. The test starts its own local server and writes screenshots to your system's temporary directory.
+
+The checks cover keyboard search, common-minute ordering, mobile and large-screen layouts, shared links, locale formatting, and clipboard behavior. They also check that native selects still work if the optional picker script cannot load.
+
+## Third-party code
+
+The searchable menus use [Tom Select 2.6.2](https://tom-select.js.org/), included in `vendor/tom-select/` under the [Apache 2.0 license](vendor/tom-select/LICENSE). Only the base JavaScript bundle and core stylesheet load, about 17 KB combined with gzip compression. The base bundle includes its search dependencies; no plugins or framework runtime load.
+
+The files come from the `tom-select@2.6.2` npm package. Source-map comments were removed because the maps are not included. Keep the license and version headers when updating these files.

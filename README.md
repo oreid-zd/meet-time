@@ -6,7 +6,7 @@ Choose a date, time, and timezone, then press **Copy link** to share a meeting t
 
 The site runs in your browser. You don't need an account, backend, or build step. All assets come from this repository; the site makes no CDN or search API requests.
 
-You can search the timezone and minute menus. Timezones are grouped by region, with your device's timezone first. Minutes start with `00`, `15`, `30`, and `45`, followed by every other minute. The date picker and short hour/AM-PM lists use native browser controls.
+Every dropdown uses the same searchable picker, including hours, AM/PM, clock format, and repeated-time choices. Timezones are grouped by region, with your device's timezone first. Minutes start with `00`, `15`, `30`, and `45`, followed by every other minute. The date field uses the browser's calendar picker.
 
 ## Run locally
 

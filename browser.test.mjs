@@ -28,13 +28,16 @@ async function newPage(options) {
   page.on('pageerror', error => errors.push(error.message));
   return page;
 }
+async function choose(page, id, value) {
+  await page.locator(`#${id}`).evaluate((select, value) => select.tomselect.setValue(value), value);
+}
 async function setFields(page, date, hour, minute, zone, hourFormat = '12') {
-  await page.locator('#hour-format').selectOption(hourFormat);
+  await choose(page, 'hour-format', hourFormat);
   await page.locator('#date').fill(date);
-  await page.locator('#hour').selectOption(String(hourFormat === '12' ? Number(hour) % 12 || 12 : Number(hour)));
-  await page.locator('#minute').evaluate((select, value) => select.tomselect.setValue(value), minute);
-  if (hourFormat === '12') await page.locator('#period').selectOption(Number(hour) < 12 ? '0' : '12');
-  await page.locator('#timezone').evaluate((select, value) => select.tomselect.setValue(value), zone);
+  await choose(page, 'hour', String(hourFormat === '12' ? Number(hour) % 12 || 12 : Number(hour)));
+  await choose(page, 'minute', minute);
+  if (hourFormat === '12') await choose(page, 'period', Number(hour) < 12 ? '0' : '12');
+  await choose(page, 'timezone', zone);
 }
 try {
   const sender = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB', viewport: { width: 1280, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
@@ -42,7 +45,9 @@ try {
   await sender.locator('#copy:not([disabled])').waitFor();
   assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');
-  assert.equal(await sender.locator('#period').isVisible(), false);
+  assert.equal(await sender.locator('#period-ts-control').isVisible(), false);
+  assert.equal(await sender.locator('.ts-wrapper').count(), 6);
+  assert.equal(await sender.getByRole('combobox').count(), 4);
   assert.equal(new URLSearchParams(new URL(sender.url()).hash.slice(1)).get('format'), '24');
   assert.equal(await sender.locator('#meeting > :first-child').getAttribute('id'), 'editor');
   assert.equal(await sender.locator('#copy-fallback').isVisible(), false);
@@ -83,7 +88,7 @@ try {
   assert.equal(await receiver.locator('#meeting > :first-child').getAttribute('id'), 'preview');
   await receiver.locator('#copy').focus();
   await receiver.keyboard.press('Tab');
-  assert.equal(await receiver.evaluate(() => document.activeElement.id), 'hour-format');
+  assert.equal(await receiver.evaluate(() => document.activeElement.id), 'hour-format-ts-control');
   assert.equal(await receiver.locator('#hour-format').inputValue(), '12');
   await receiver.goto(link.replace('&format=12', ''));
   await receiver.locator('#copy:not([disabled])').waitFor();
@@ -111,7 +116,7 @@ try {
   assert.equal(await mobile.locator('#meeting > :first-child').getAttribute('id'), 'editor');
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   for (const hourFormat of ['24', '12']) {
-    await mobile.locator('#hour-format').selectOption(hourFormat);
+    await choose(mobile, 'hour-format', hourFormat);
     await mobile.getByRole('combobox', { name: 'Minute', exact: true }).focus();
     await mobile.keyboard.press('ArrowDown');
     await mobile.locator('.ts-dropdown.minute-picker').waitFor();
@@ -129,6 +134,24 @@ try {
   assert.equal(pickers.url(), beforeBrandClick);
   assert.equal(await pickers.locator('.brand').getAttribute('href'), null);
   await pickers.screenshot({ path: join(tmpdir(), 'meet-time-large.png'), fullPage: true });
+
+  // The hour, period and format controls use the same searchable dropdown and keyboard actions.
+  await pickers.getByRole('combobox', { name: 'Hour', exact: true }).fill('11');
+  await pickers.locator('#hour-ts-dropdown .active[data-value="11"]').waitFor();
+  await pickers.keyboard.press('Enter');
+  assert.equal(await pickers.locator('#hour').inputValue(), '11');
+  await pickers.getByRole('combobox', { name: 'AM or PM' }).fill('am');
+  await pickers.locator('#period-ts-dropdown .active[data-value="0"]').waitFor();
+  await pickers.keyboard.press('Enter');
+  assert.equal(await pickers.locator('#period').inputValue(), '0');
+  const beforeFormatChange = new URLSearchParams(new URL(pickers.url()).hash.slice(1)).get('at');
+  await pickers.getByRole('combobox', { name: 'Time format' }).fill('24');
+  await pickers.locator('#hour-format-ts-dropdown .active[data-value="24"]').waitFor();
+  await pickers.keyboard.press('Enter');
+  assert.equal(await pickers.locator('#hour-format').inputValue(), '24');
+  assert.equal(await pickers.locator('#period-ts-control').isVisible(), false);
+  assert.equal(new URLSearchParams(new URL(pickers.url()).hash.slice(1)).get('at'), beforeFormatChange);
+  await setFields(pickers, '2026-07-15', '15', '30', 'Europe/London');
 
   const zoneSearch = pickers.getByRole('combobox', { name: 'Timezone', exact: true });
   const minuteSearch = pickers.getByRole('combobox', { name: 'Minute', exact: true });
@@ -162,6 +185,9 @@ try {
   await pickers.waitForFunction(() => document.getElementById('timezone').tomselect.getValue() === 'US/Eastern');
   assert.equal(await pickers.locator('#minute').evaluate(select => select.tomselect.getValue()), '35');
   assert.equal(await pickers.locator('#timezone').inputValue(), 'US/Eastern');
+  assert.equal(await pickers.locator('#hour-format').evaluate(select => select.tomselect.getValue()), '24');
+  assert.equal(await pickers.locator('#hour').evaluate(select => select.tomselect.getValue()), '10');
+  assert.equal(await pickers.locator('#period-ts-control').isVisible(), false);
 
   // Optional enhancement failure must leave usable native selects.
   const fallback = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
@@ -173,6 +199,10 @@ try {
   await fallback.locator('#timezone').selectOption('UTC');
   assert.equal(await fallback.locator('#local-time').innerText(), '3:45 PM');
   assert.equal(await fallback.locator('#minute optgroup').first().getAttribute('label'), 'Common');
+  await fallback.locator('#hour').selectOption('11');
+  await fallback.locator('#period').selectOption('0');
+  await fallback.locator('#hour-format').selectOption('24');
+  assert.equal(await fallback.locator('#local-time').innerText(), '11:45');
   await fallback.context().close();
   await pickers.context().close();
 
@@ -187,15 +217,18 @@ try {
       assert.equal(await clock.locator('#local-time').innerText(), expected);
       const at = `2026-07-15T${String(hour).padStart(2, '0')}:35:00.000Z`;
       assert.equal(new URLSearchParams(new URL(clock.url()).hash.slice(1)).get('at'), at);
-      await clock.locator('#hour-format').selectOption(hourFormat === '12' ? '24' : '12');
+      await choose(clock, 'hour-format', hourFormat === '12' ? '24' : '12');
       assert.equal(new URLSearchParams(new URL(clock.url()).hash.slice(1)).get('at'), at);
-      await clock.locator('#hour-format').selectOption(hourFormat);
+      await choose(clock, 'hour-format', hourFormat);
       assert.equal(new URLSearchParams(new URL(clock.url()).hash.slice(1)).get('at'), at);
       await clock.reload();
       await clock.locator('#copy:not([disabled])').waitFor();
       assert.equal(await clock.locator('#hour-format').inputValue(), hourFormat);
       assert.equal(await clock.locator('#hour').inputValue(), String(hourFormat === '12' ? hour % 12 || 12 : hour));
-      assert.equal(await clock.locator('#period').isVisible(), hourFormat === '12');
+      assert.equal(await clock.locator('#period-ts-control').isVisible(), hourFormat === '12');
+      assert.deepEqual(await clock.locator('#hour').evaluate(select => Object.keys(select.tomselect.options).sort()),
+        Array.from({ length: hourFormat === '12' ? 12 : 24 }, (_, n) => String(n + (hourFormat === '12' ? 1 : 0))).sort());
+      assert.equal(await clock.locator('#hour').evaluate(select => select.tomselect.getValue()), String(hourFormat === '12' ? hour % 12 || 12 : hour));
       assert.equal(await clock.locator('#local-time').innerText(), expected);
     }
   }
@@ -225,7 +258,7 @@ try {
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.equal(new URL(sender.url()).hash, '');
   assert.equal(await sender.locator('#share-url').inputValue(), '');
-  await sender.locator('#hour-format').selectOption('24');
+  await choose(sender, 'hour-format', '24');
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.match(await sender.locator('#error').innerText(), /doesn't exist/);
 
@@ -233,20 +266,25 @@ try {
   assert.equal(await sender.locator('#occurrence-field').isVisible(), true);
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.equal(await sender.locator('#occurrence').inputValue(), '');
-  assert.equal(await sender.locator('label[for="occurrence"]').innerText(), 'Which time?');
+  assert.equal(await sender.locator('label[for="occurrence-ts-control"]').innerText(), 'Which time?');
+  assert.equal(await sender.getByRole('combobox', { name: 'Which time?' }).getAttribute('aria-describedby'), 'occurrence-hint');
   assert.equal(await sender.locator('#occurrence option').first().innerText(), 'Choose first or second');
   assert.match(await sender.locator('#occurrence option').nth(1).innerText(), /1:30 am/);
   const second = String(Date.parse('2026-11-01T06:30:00.000Z'));
-  await sender.locator('#occurrence').selectOption(second);
-  assert.equal(await sender.locator('#copy').isEnabled(), true);
-  await sender.locator('#hour-format').selectOption('24');
+  await sender.getByRole('combobox', { name: 'Which time?' }).fill('Second');
+  await sender.locator(`#occurrence-ts-dropdown .active[data-value="${second}"]`).waitFor();
+  await sender.keyboard.press('Enter');
   assert.equal(await sender.locator('#occurrence').inputValue(), second);
+  assert.equal(await sender.locator('#copy').isEnabled(), true);
+  await choose(sender, 'hour-format', '24');
+  assert.equal(await sender.locator('#occurrence').inputValue(), second);
+  assert.match(await sender.locator('#occurrence').evaluate(select => select.tomselect.options[select.value].text), /01:30/);
   assert.equal(await sender.locator('#copy').isEnabled(), true);
   assert.equal(new URLSearchParams(new URL(sender.url()).hash.slice(1)).get('at'), '2026-11-01T06:30:00.000Z');
-  await sender.locator('#hour-format').selectOption('12');
+  await choose(sender, 'hour-format', '12');
   assert.equal(await sender.locator('#occurrence').inputValue(), second);
   const repeatedLink = await sender.locator('#share-url').inputValue();
-  await sender.locator('#timezone').evaluate(select => select.tomselect.setValue('America/New_York'));
+  await choose(sender, 'timezone', 'America/New_York');
   assert.equal(sender.url(), repeatedLink);
   assert.equal(await sender.locator('#occurrence').inputValue(), second);
   await sender.locator('#timezone-ts-control').fill('nonsense');
@@ -254,6 +292,13 @@ try {
   await sender.locator('#copy').focus();
   assert.equal(sender.url(), repeatedLink);
   assert.equal(await sender.locator('#occurrence').inputValue(), second);
+  await sender.locator('#date').fill('2027-11-07');
+  assert.equal(await sender.locator('#copy').isDisabled(), true);
+  assert.equal(await sender.locator('#occurrence').evaluate(select => select.tomselect.getValue()), '');
+  assert.deepEqual(await sender.locator('#occurrence').evaluate(select => Object.keys(select.tomselect.options).sort()),
+    ['2027-11-07T05:30:00.000Z', '2027-11-07T06:30:00.000Z'].map(value => String(Date.parse(value))).sort());
+  await sender.goto(repeatedLink);
+  await sender.locator('#copy:not([disabled])').waitFor();
   await receiver.goto(repeatedLink);
   await receiver.locator('#copy:not([disabled])').waitFor();
   assert.equal(await receiver.locator('#occurrence').inputValue(), second);
@@ -273,7 +318,7 @@ try {
   assert.equal(await receiver.evaluate(() => document.activeElement.id), 'share-url');
   assert.equal(await receiver.evaluate(() => { const el = document.querySelector('#share-url'); return el.selectionEnd - el.selectionStart === el.value.length; }), true);
   assert.equal(await receiver.locator('#copy-fallback').isVisible(), true);
-  await receiver.locator('#minute').evaluate(select => select.tomselect.setValue('31'));
+  await choose(receiver, 'minute', '31');
   assert.equal(await receiver.locator('#copy-fallback').isVisible(), false);
   assert.equal(await receiver.locator('#copy-status').innerText(), '');
   await receiver.locator('#copy').click();
@@ -289,14 +334,14 @@ try {
   assert.match(await sender.locator('#copy-status').innerText(), /manually/);
 
   await sender.locator('#date').fill('');
-  await sender.locator('#hour').focus();
+  await sender.getByRole('combobox', { name: 'Hour', exact: true }).focus();
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.match(await sender.locator('#error').innerText(), /valid date and time/);
-  await sender.locator('#hour-format').selectOption('24');
+  await choose(sender, 'hour-format', '24');
   assert.equal(await sender.locator('#date').inputValue(), '');
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.deepEqual(errors, []);
-  console.log('Passed: logo, responsive sizing, searchable/grouped pickers, native fallback, clock formats, locales, DST, shared links, and clipboard.');
+  console.log('Passed: consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
   console.log(`Screenshots saved in ${tmpdir()}`);
 } finally {
   await browser.close();

@@ -26,7 +26,7 @@ h1 { font-size: 2.25rem; font-weight: 650; letter-spacing: -.03em; margin: 0 0 .
 .editor, .preview { padding: 1.75rem; }
 h2 { font-size: 1.125rem; font-weight: 650; margin: 0; }
 .editor-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1.25rem; }
-#hour-format { width: auto; }
+#hour-format, .ts-wrapper.format-picker { width: 7.25rem; flex-shrink: 0; }
 fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
 .date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 1rem; }
 .field { margin-top: 1.25rem; }
@@ -55,7 +55,7 @@ button svg { width: 1.125rem; height: 1.125rem; fill: none; stroke: currentColor
 #share-url { text-overflow: ellipsis; }
 .error { padding: .875rem 1.125rem; background: #fff0e9; border: 1px solid #ddaa90; color: #803a20; border-radius: .65rem; font-size: .875rem; line-height: 1.6; margin: 0 0 1rem; }
 
-/* Match the two searchable selects to the native fields. */
+/* Keep dropdowns, the date field, and native fallbacks visually consistent. */
 .ts-wrapper { min-width: 0; text-align: left; }
 .ts-control { --ts-pr-min: 1.8rem; min-height: 3rem; align-items: center; padding: .6rem .75rem; border: 1px solid #ced8cf; border-radius: .5rem; }
 .ts-control::after { content: ""; position: absolute; right: .75rem; top: 50%; width: .35rem; height: .35rem; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-75%) rotate(45deg); pointer-events: none; }

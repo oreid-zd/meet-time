@@ -18,6 +18,26 @@ function selectedHour() {
   return $('period').hidden ? hour : hour % 12 + Number($('period').value);
 }
 
+function syncPicker(id) {
+  const select = $(id);
+  const picker = select.tomselect;
+  if (!picker) return;
+  picker.close();
+  const value = select.value;
+  // Replace dynamic lists; leave static groups intact when restoring a selection.
+  if (id === 'hour' || id === 'occurrence') {
+    picker.clearOptions(() => false);
+    picker.addOptions([...select.options].filter(option => option.value)
+      .map(option => ({ value: option.value, text: option.text })));
+  }
+  if (value && !picker.options[value]) {
+    picker.addOption({ value, text: select.selectedOptions[0].text });
+  }
+  picker.isRequired = select.required;
+  picker.setValue(value, true);
+  picker.wrapper.hidden = select.hidden;
+}
+
 function setHour(hour) {
   const twelveHour = $('hour-format').value === '12';
   const numbers = new Intl.NumberFormat(undefined, { minimumIntegerDigits: twelveHour ? 1 : 2 });
@@ -29,6 +49,8 @@ function setHour(hour) {
   $('period').value = hour < 12 ? '0' : '12';
   $('period').hidden = !twelveHour;
   $('period').required = twelveHour;
+  syncPicker('hour');
+  syncPicker('period');
 }
 
 let copyResetTimer;
@@ -95,6 +117,8 @@ function update(preferredInstant) {
     $('copy').disabled = false;
   } catch (error) {
     showError(error.message);
+  } finally {
+    syncPicker('occurrence');
   }
 }
 
@@ -120,9 +144,10 @@ function load() {
   setHour(Number(parts.time.slice(0, 2)));
   $('minute').value = parts.time.slice(3, 5);
   $('timezone').value = timeZone;
-  for (const id of ['minute', 'timezone']) $(id).tomselect?.sync();
   $('local-zone').textContent = zoneLabel(viewerZone);
   $('occurrence-field').hidden = true;
+  for (const id of ['hour-format', 'minute', 'timezone']) syncPicker(id);
+  $('occurrence').tomselect?.close();
   if (linkError) showError(linkError, false);
   else update(instant);
 }
@@ -194,10 +219,11 @@ $('copy').addEventListener('click', async () => {
   }
 });
 
-// Enhance only the long lists. Native selects still work if the optional script fails to load.
+// Use the same picker for every dropdown, with native selects as a fallback.
 if (window.TomSelect && !$('fields').disabled) {
-  for (const id of ['minute', 'timezone']) {
-    const picker = new window.TomSelect($(id), {
+  for (const select of $('fields').querySelectorAll('select')) {
+    const id = select.id;
+    const picker = new window.TomSelect(select, {
       create: false,
       maxOptions: null,
       refreshThrottle: 0,
@@ -206,10 +232,15 @@ if (window.TomSelect && !$('fields').disabled) {
       lockOptgroupOrder: true,
       searchField: ['text', 'value'],
       sortField: [{ field: '$order' }, { field: '$score' }],
-      placeholder: id === 'timezone' ? 'Search city or timezone' : 'Search minutes',
+      placeholder: { timezone: 'Search city or timezone', occurrence: 'Choose first or second' }[id] || 'Search',
       onDelete: () => false,
     });
     picker.control_input.setAttribute('aria-autocomplete', 'list');
-    $(id).setAttribute('aria-hidden', 'true');
+    if (select.hasAttribute('aria-label')) picker.control_input.removeAttribute('aria-labelledby');
+    if (select.hasAttribute('aria-describedby')) {
+      picker.control_input.setAttribute('aria-describedby', select.getAttribute('aria-describedby'));
+    }
+    select.setAttribute('aria-hidden', 'true');
+    picker.wrapper.hidden = select.hidden;
   }
 }

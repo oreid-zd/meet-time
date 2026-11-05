@@ -8,6 +8,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const root = new URL('.', import.meta.url);
 const assets = {
   'index.html': 'text/html', 'style.css': 'text/css', 'app.mjs': 'text/javascript', 'time.mjs': 'text/javascript',
+  'llms.txt': 'text/plain', 'skills/meettime/SKILL.md': 'text/plain',
   'vendor/tom-select/tom-select.min.css': 'text/css',
   'vendor/tom-select/tom-select.base.min.js': 'text/javascript',
 };
@@ -41,8 +42,23 @@ async function setFields(page, date, hour, minute, zone, hourFormat = '12') {
 }
 try {
   const sender = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB', viewport: { width: 1280, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const skillResponse = await sender.request.get(new URL('skills/meettime/SKILL.md', base).href);
+  assert.equal(skillResponse.status(), 200);
+  const skill = await skillResponse.text();
+  const example = skill.match(/^https:\/\/oreid-zd\.github\.io\/meet-time\/#\S+$/m)[0];
+  const overview = await sender.request.get(new URL('llms.txt', base).href);
+  assert.equal(overview.status(), 200);
+  assert.ok((await overview.text()).includes('https://oreid-zd.github.io/meet-time/skills/meettime/SKILL.md'));
+  await sender.goto(base + new URL(example).hash);
+  await sender.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await sender.locator('#local-time').innerText(), '15:30');
+  assert.equal(await sender.locator('#date').inputValue(), '2026-07-15');
+  assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
+  assert.equal(await sender.locator('#local-time').getAttribute('datetime'), '2026-07-15T14:30:00.000Z');
   await sender.goto(base);
   await sender.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await sender.getByRole('link', { name: 'For AI agents' }).getAttribute('href'), './skills/meettime/SKILL.md');
+  assert.equal(await sender.locator('link[rel="describedby"]').getAttribute('href'), './llms.txt');
   assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');
   assert.equal(await sender.locator('#period-ts-control').isVisible(), false);

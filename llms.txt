@@ -1,0 +1,9 @@
+# Meettime
+
+> Share a meeting time with a link. Each recipient sees it in their own timezone.
+
+Agents can construct share links directly without opening a browser or calling an API. Meeting parameters belong in the URL fragment (`#`), not the query string. Creating a link does not schedule a meeting or send invitations.
+
+## Instructions
+
+- [Meettime skill](https://oreid-zd.github.io/meet-time/skills/meettime/SKILL.md): URL parameters, timezone and daylight-saving guidance, and a complete example.

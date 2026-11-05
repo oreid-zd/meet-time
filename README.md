@@ -42,6 +42,10 @@ https://oreid-zd.github.io/meet-time/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%
 - The site rejects times skipped by a daylight-saving change. If a time happens twice when the clocks go back, you must choose the first or second time before copying a link. The browser's `Intl` data provides the timezone rules.
 - Use a current version of Chrome, Firefox, Edge, or Safari that supports `Intl.supportedValuesOf`, and enable JavaScript.
 
+## For AI agents
+
+Point your agent at the [Meettime skill](https://oreid-zd.github.io/meet-time/skills/meettime/SKILL.md) to create share links directly. The homepage links to it, and [llms.txt](https://oreid-zd.github.io/meet-time/llms.txt) lists the instructions. Discovery depends on the agent; reading a skill from a URL does not necessarily install it.
+
 ## Check the timezone logic
 
 With Node.js 18 or later:

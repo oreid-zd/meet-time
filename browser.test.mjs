@@ -78,6 +78,11 @@ try {
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');
   assert.equal(await sender.locator('#period-ts-control').isVisible(), false);
   assert.equal(await sender.locator('.ts-wrapper').count(), 6);
+  for (const input of await sender.locator('.ts-control input').all()) {
+    assert.equal(await input.evaluate(element => element.dispatchEvent(new ClipboardEvent('paste', {
+      bubbles: true, cancelable: true,
+    }))), true, 'Dropdowns must not cancel native paste');
+  }
   assert.equal(await sender.getByRole('combobox').count(), 4);
   assert.equal(new URLSearchParams(new URL(sender.url()).hash.slice(1)).get('format'), '24');
   assert.equal(await sender.locator('#meeting > :first-child').getAttribute('id'), 'editor');
@@ -186,7 +191,11 @@ try {
 
   const zoneSearch = pickers.getByRole('combobox', { name: 'Timezone', exact: true });
   const minuteSearch = pickers.getByRole('combobox', { name: 'Minute', exact: true });
-  await zoneSearch.fill('New York');
+  await pickers.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await pickers.evaluate(() => navigator.clipboard.writeText('New York'));
+  await zoneSearch.focus();
+  await pickers.keyboard.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+  assert.equal(await zoneSearch.inputValue(), 'New York');
   await pickers.locator('.ts-dropdown .active[data-value="America/New_York"]').waitFor();
   await pickers.screenshot({ path: join(tmpdir(), 'meet-time-timezone-search.png'), fullPage: true });
   await pickers.keyboard.press('Enter');

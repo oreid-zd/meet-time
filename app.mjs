@@ -244,6 +244,8 @@ if (window.TomSelect && !$('fields').disabled) {
       placeholder: { timezone: 'Search city or timezone', occurrence: 'Choose first or second' }[id] || 'Search',
       onDelete: () => false,
     });
+    // Single-select search needs native paste, not Tom Select's multi-item paste handler.
+    picker.hook('instead', 'onPaste', () => {});
     picker.control_input.setAttribute('aria-autocomplete', 'list');
     if (select.hasAttribute('aria-label')) picker.control_input.removeAttribute('aria-labelledby');
     if (select.hasAttribute('aria-describedby')) {

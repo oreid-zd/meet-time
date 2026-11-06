@@ -1,4 +1,5 @@
 import { partsAt, possibleInstants, readSelection, selectionURL } from './time.mjs';
+import { track } from './analytics.mjs';
 
 const $ = id => document.getElementById(id);
 const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -150,6 +151,7 @@ function load() {
   $('occurrence').tomselect?.close();
   if (linkError) showError(linkError, false);
   else update(instant);
+  return selection;
 }
 
 try {
@@ -180,7 +182,11 @@ try {
   }
   $('timezone').replaceChildren(...groups.values());
   $('fields').disabled = false;
-  load();
+  const selection = load();
+  if (selection) {
+    const meetingZone = new Intl.DateTimeFormat('en', { timeZone: selection.timeZone }).resolvedOptions().timeZone;
+    track('shared_link_opened', { different_timezone: meetingZone !== viewerZone });
+  }
 } catch {
   $('fields').disabled = true;
   showError("Couldn't load the timezone converter. Try the latest version of your browser.", false);
@@ -202,15 +208,18 @@ $('share-url').addEventListener('click', () => $('share-url').select());
 $('copy').addEventListener('click', async () => {
   const url = $('share-url').value;
   if (!url) return;
+  const timeZone = $('timezone').value;
   clearShareStatus();
   try {
     await navigator.clipboard.writeText(url);
+    track('link_copied', { timezone: timeZone });
     if ($('share-url').value === url) {
       clearShareStatus();
       $('copy-label').textContent = 'Copied!';
       copyResetTimer = setTimeout(clearShareStatus, 3000);
     }
   } catch {
+    track('copy_failed');
     if ($('share-url').value !== url) return;
     $('copy-fallback').hidden = false;
     $('share-url').focus();

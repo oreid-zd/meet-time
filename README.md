@@ -4,7 +4,7 @@
 
 Choose a date, time, and timezone, then press **Copy link** to share a meeting time. Anyone opening the link sees their local time first and can edit the meeting details below.
 
-The site runs in your browser. You don't need an account, backend, or build step. All assets come from this repository; the site makes no CDN or search API requests.
+The site runs in your browser. You don't need an account, backend, or build step. The timezone converter and dropdown assets come from this repository. On `meettime.at` (or when explicitly testing analytics locally), the site also loads PostHog from its CDN for usage analytics; it makes no search API requests.
 
 Every dropdown uses the same searchable picker, including hours, AM/PM, clock format, and repeated-time choices. Timezones are grouped by region, with your device's timezone first. Minutes start with `00`, `15`, `30`, and `45`, followed by every other minute. The date field uses the browser's calendar picker.
 
@@ -17,6 +17,10 @@ python3 -m http.server 8000
 ```
 
 Open http://localhost:8000. Use this server instead of opening `index.html` directly so the browser can load the JavaScript modules. **Copy link** works on localhost and HTTPS. If your browser blocks clipboard access, the site selects the link so you can copy it yourself.
+
+To send real events to PostHog during local testing, open http://localhost:8000/?analytics=1. Events have `environment: development`; filter on `environment: production` in your normal insights to exclude them. The switch works only on loopback hosts (`localhost`, `127.0.0.1`, or `[::1]`). Do Not Track, Global Privacy Control, and blockers still apply.
+
+In your US PostHog project's live event view, filter on `environment: development`. Opening the local page sends `$pageview`; pressing **Copy link** sends `link_copied` with `timezone`. Open the copied local URL in a new tab to send `shared_link_opened` with `different_timezone`. Allow a few seconds for event batching. Normal local visits without `?analytics=1` send nothing.
 
 ## Deploy on GitHub Pages
 
@@ -39,10 +43,31 @@ https://meettime.at/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=2
 - `at` is the exact UTC instant, and `tz` is the chosen IANA timezone. These values restore the date and time, including whether you chose the first or second occurrence of a repeated time.
 - `format=24` or `format=12` saves the hour format for both the picker and result. New visits and links without this parameter default to 24-hour time. Switching formats keeps the same meeting time.
 - The address bar and share link update when you change a field. Links you've already sent keep their original time.
-- The browser doesn't send the URL fragment (everything after `#`) in HTTP requests. The site doesn't use analytics or save application data. GitHub still receives normal page requests.
+- The browser doesn't send the URL fragment (everything after `#`) in HTTP requests. The site doesn't save application data. Analytics exclude the fragment and query string. Only the selected timezone is sent when copying succeeds; the meeting date, time, and full link aren't sent to PostHog. GitHub still receives normal page requests.
 - Your device or browser settings determine your timezone, not geolocation. Digits, date formatting, and AM/PM labels (in 12-hour mode) follow your browser's locale.
 - The site rejects times skipped by a daylight-saving change. If a time happens twice when the clocks go back, you must choose the first or second time before copying a link. The browser's `Intl` data provides the timezone rules.
 - Use a current version of Chrome, Firefox, Edge, or Safari that supports `Intl.supportedValuesOf`, and enable JavaScript.
+
+## Analytics
+
+On `meettime.at`, and on loopback hosts with `?analytics=1`, PostHog's US service receives one pageview per page load and three explicit events. Every event includes `environment` (`production` or `development`). Pageviews include `entry_type`: `new` for visits without a meeting selection, `shared` for valid meeting links, or `invalid` for malformed meeting links. This describes the initial URL, not whether the person is a returning visitor. Separate `new` and `shared` visits when measuring copy conversion: recipients can succeed just by reading the time.
+
+- `shared_link_opened`: the initial URL contains a valid meeting link, with `different_timezone` indicating whether the meeting and viewer use different canonical IANA timezones. Aliases such as `US/Eastern` and `America/New_York` count as the same timezone. Different zones may have the same UTC offset on a given date. The viewer's exact timezone is not sent. This counts opens, including reloads and the sender reopening their own link, not unique recipients.
+- `link_copied`: writing the link to the clipboard succeeds, with a `timezone` property containing the selected IANA timezone (for example, `Europe/London`). The value is captured when copying starts, so changes while the clipboard request is pending don't misattribute the copied link. In PostHog, create a Trends insight counting `link_copied` events and break down by the `timezone` event property to see the most-used timezones. This counts successful copies, not unique users or every dropdown change.
+- `copy_failed`: writing to the clipboard fails and may require manual copying.
+
+Changing fields or navigating between URL fragments doesn't create extra pageviews or shared-link-open events. Analytics are disabled on loopback hosts unless explicitly enabled with `?analytics=1`, on all other non-production hostnames, and when the browser signals Do Not Track or Global Privacy Control. Blocking PostHog doesn't prevent the converter or copying from working.
+
+Autocapture, session recording, surveys, person profiles, and browser persistence are disabled. PostHog keeps an anonymous identifier in memory for the current page only; returning visitors and cross-page funnels cannot be measured reliably. Events allow only basic browser/device metadata and transient identifiers, plus the environment, pageview entry type, cross-timezone boolean on shared-link opens, and selected timezone on `link_copied`. No meeting date, time, other form values, URL query strings, or fragments are sent. Referrers are reduced to their origin. IP-based geolocation is disabled; PostHog still receives network requests and therefore sees the connection's IP address.
+
+Useful PostHog insights (filter all of them to `environment: production`):
+
+- Copy conversion and time to first copy: a funnel from `$pageview` filtered to `entry_type: new`, then `link_copied`. Break down by `$device_type` to compare mobile and desktop. Recipient visits are excluded from this creator funnel.
+- Clipboard failure rate: a Trends formula `100 * A / (A + B)`, where A counts `copy_failed` and B counts `link_copied`. This measures clipboard attempts, not visitors; manual fallback copies aren't observable.
+- Cross-timezone opens: count `shared_link_opened`, broken down by `different_timezone`.
+- Timezone popularity: count `link_copied`, broken down by `timezone`.
+
+The project token in `analytics.mjs` is public, not a personal API key. No backend or build configuration is needed. Review privacy notice and consent requirements before deploying; disabling persistence alone does not establish a consent exemption.
 
 ## For AI agents
 
@@ -71,7 +96,7 @@ node browser.test.mjs
 
 If you already have Playwright installed elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs` path instead. The test starts its own local server and writes screenshots to your system's temporary directory.
 
-The checks cover skill discovery and its checksum, the documented example link, keyboard search, common-minute ordering, mobile and large-screen layouts, shared links, locale formatting, and clipboard behavior. They also check that native selects still work if the optional picker script cannot load.
+The checks cover skill discovery and its checksum, the documented example link, keyboard search, common-minute ordering, mobile and large-screen layouts, shared links, locale formatting, clipboard behavior, and analytics events/privacy with a mocked PostHog SDK (no test events reach PostHog). They also check that native selects still work if the optional picker script cannot load.
 
 ## Third-party code
 

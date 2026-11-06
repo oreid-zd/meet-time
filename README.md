@@ -1,6 +1,6 @@
 # Meettime
 
-[Open Meettime](https://oreid-zd.github.io/meet-time/)
+[Open Meettime](https://meettime.at/)
 
 Choose a date, time, and timezone, then press **Copy link** to share a meeting time. Anyone opening the link sees their local time first and can edit the meeting details below.
 
@@ -26,12 +26,14 @@ Open http://localhost:8000. Use this server instead of opening `index.html` dire
 4. Select your default branch (usually `main`) and **/ (root)**, then save.
 5. Once deployment finishes, open the URL GitHub provides, usually `https://YOUR-USERNAME.github.io/YOUR-REPO/`.
 
+Meettime uses the custom domain `meettime.at`, recorded in `CNAME`. Keep the matching custom domain configured in **Settings → Pages** and enable **Enforce HTTPS**.
+
 You don't need a custom workflow or build configuration. Relative asset paths work at both a repository URL and a custom domain. Share links from the deployed site rather than localhost.
 
 ## How links work
 
 ```text
-https://oreid-zd.github.io/meet-time/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=24
+https://meettime.at/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=24
 ```
 
 - `at` is the exact UTC instant, and `tz` is the chosen IANA timezone. These values restore the date and time, including whether you chose the first or second occurrence of a repeated time.
@@ -41,6 +43,12 @@ https://oreid-zd.github.io/meet-time/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%
 - Your device or browser settings determine your timezone, not geolocation. Digits, date formatting, and AM/PM labels (in 12-hour mode) follow your browser's locale.
 - The site rejects times skipped by a daylight-saving change. If a time happens twice when the clocks go back, you must choose the first or second time before copying a link. The browser's `Intl` data provides the timezone rules.
 - Use a current version of Chrome, Firefox, Edge, or Safari that supports `Intl.supportedValuesOf`, and enable JavaScript.
+
+## For AI agents
+
+Point your agent at the [Meettime skill](https://meettime.at/skills/meettime/SKILL.md) to create share links directly. [llms.txt](https://meettime.at/llms.txt) lists the instructions, and the homepage advertises it through HTML metadata without a visible footer link. Discovery depends on the agent; reading a skill from a URL does not necessarily install it.
+
+The [discovery index](https://meettime.at/.well-known/agent-skills/index.json) follows the [Agent Skills discovery draft v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc). It points to the same skill and includes its SHA-256 digest. After editing `skills/meettime/SKILL.md`, run `shasum -a 256 skills/meettime/SKILL.md` and update the index's `digest` value (`sha256:` followed by the hash). The browser test checks that they match.
 
 ## Check the timezone logic
 
@@ -63,7 +71,7 @@ node browser.test.mjs
 
 If you already have Playwright installed elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs` path instead. The test starts its own local server and writes screenshots to your system's temporary directory.
 
-The checks cover keyboard search, common-minute ordering, mobile and large-screen layouts, shared links, locale formatting, and clipboard behavior. They also check that native selects still work if the optional picker script cannot load.
+The checks cover skill discovery and its checksum, the documented example link, keyboard search, common-minute ordering, mobile and large-screen layouts, shared links, locale formatting, and clipboard behavior. They also check that native selects still work if the optional picker script cannot load.
 
 ## Third-party code
 

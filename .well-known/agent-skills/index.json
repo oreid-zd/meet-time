@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "meettime",
+      "type": "skill-md",
+      "description": "Create Meettime links for sharing a meeting time that each recipient sees in their own timezone.",
+      "url": "/skills/meettime/SKILL.md",
+      "digest": "sha256:216b7f882a9fe6c85da008154332c3205a6dd93331420088bfc426675a519c06"
+    }
+  ]
+}

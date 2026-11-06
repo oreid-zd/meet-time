@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,18 +9,20 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const root = new URL('.', import.meta.url);
 const assets = {
   'index.html': 'text/html', 'style.css': 'text/css', 'app.mjs': 'text/javascript', 'time.mjs': 'text/javascript',
+  'llms.txt': 'text/plain', 'skills/meettime/SKILL.md': 'text/plain',
+  '.well-known/agent-skills/index.json': 'application/json',
   'vendor/tom-select/tom-select.min.css': 'text/css',
   'vendor/tom-select/tom-select.base.min.js': 'text/javascript',
 };
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
-  const file = path === '/meet-time/' ? 'index.html' : path.replace(/^\/meet-time\//, '');
+  const file = path === '/' ? 'index.html' : path.slice(1);
   if (!assets[file]) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { 'content-type': assets[file] });
   res.end(await readFile(new URL(file, root)));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const base = `http://127.0.0.1:${server.address().port}/meet-time/`;
+const base = `http://127.0.0.1:${server.address().port}/`;
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const errors = [];
 async function newPage(options) {
@@ -41,8 +44,36 @@ async function setFields(page, date, hour, minute, zone, hourFormat = '12') {
 }
 try {
   const sender = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB', viewport: { width: 1280, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] });
+  const indexResponse = await sender.request.get(new URL('.well-known/agent-skills/index.json', base).href);
+  assert.equal(indexResponse.status(), 200);
+  assert.equal(indexResponse.headers()['content-type'], 'application/json');
+  const index = await indexResponse.json();
+  assert.equal(index.$schema, 'https://schemas.agentskills.io/discovery/0.2.0/schema.json');
+  assert.equal(index.skills.length, 1);
+  const entry = index.skills[0];
+  assert.equal(entry.name, 'meettime');
+  assert.equal(entry.type, 'skill-md');
+  assert.equal(entry.url, '/skills/meettime/SKILL.md');
+  const skillResponse = await sender.request.get(new URL(entry.url, indexResponse.url()).href);
+  assert.equal(skillResponse.status(), 200);
+  const skillBytes = await skillResponse.body();
+  assert.equal(entry.digest, `sha256:${createHash('sha256').update(skillBytes).digest('hex')}`);
+  const skill = skillBytes.toString('utf8');
+  assert.ok(skill.startsWith(`---\nname: ${entry.name}\ndescription: ${entry.description}\n---\n`));
+  const example = skill.match(/^https:\/\/meettime\.at\/#\S+$/m)[0];
+  const overview = await sender.request.get(new URL('llms.txt', base).href);
+  assert.equal(overview.status(), 200);
+  assert.ok((await overview.text()).includes('https://meettime.at/skills/meettime/SKILL.md'));
+  await sender.goto(base + new URL(example).hash);
+  await sender.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await sender.locator('#local-time').innerText(), '15:30');
+  assert.equal(await sender.locator('#date').inputValue(), '2026-07-15');
+  assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
+  assert.equal(await sender.locator('#local-time').getAttribute('datetime'), '2026-07-15T14:30:00.000Z');
   await sender.goto(base);
   await sender.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await sender.getByRole('link', { name: 'For AI agents', includeHidden: true }).count(), 0);
+  assert.equal(await sender.locator('link[rel="describedby"]').getAttribute('href'), './llms.txt');
   assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');
   assert.equal(await sender.locator('#period-ts-control').isVisible(), false);
@@ -60,7 +91,7 @@ try {
   assert.equal(await sender.locator('#period option:checked').innerText(), 'pm');
   const link = await sender.locator('#share-url').inputValue();
   assert.equal(new URLSearchParams(new URL(link).hash.slice(1)).get('at'), '2026-07-15T14:30:00.000Z');
-  assert.equal(new URL(link).pathname, '/meet-time/');
+  assert.equal(new URL(link).pathname, '/');
   assert.equal(new URLSearchParams(new URL(link).hash.slice(1)).get('format'), '12');
   await sender.locator('#copy').click();
   assert.equal(await sender.evaluate(() => navigator.clipboard.readText()), link);
@@ -341,7 +372,7 @@ try {
   assert.equal(await sender.locator('#date').inputValue(), '');
   assert.equal(await sender.locator('#copy').isDisabled(), true);
   assert.deepEqual(errors, []);
-  console.log('Passed: consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
+  console.log('Passed: skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
   console.log(`Screenshots saved in ${tmpdir()}`);
 } finally {
   await browser.close();

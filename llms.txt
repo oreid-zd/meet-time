@@ -6,4 +6,5 @@ Agents can construct share links directly without opening a browser or calling a
 
 ## Instructions
 
-- [Meettime skill](https://oreid-zd.github.io/meet-time/skills/meettime/SKILL.md): URL parameters, timezone and daylight-saving guidance, and a complete example.
+- [Meettime skill](https://meettime.at/skills/meettime/SKILL.md): URL parameters, timezone and daylight-saving guidance, and a complete example.
+- [Skill discovery index](https://meettime.at/.well-known/agent-skills/index.json): Agent Skills discovery draft v0.2.0 metadata and checksum.

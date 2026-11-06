@@ -9,7 +9,7 @@ Construct a URL and return it to the user. No account, API request, or browser a
 
 ## URL format
 
-Use `https://oreid-zd.github.io/meet-time/` with these parameters in the fragment (after `#`), not the query string:
+Use `https://meettime.at/` with these parameters in the fragment (after `#`), not the query string:
 
 - `at`: the exact UTC instant as an ISO timestamp, including seconds, three millisecond digits, and `Z`, as produced by `Date.toISOString()`.
 - `tz`: the source IANA timezone, such as `Europe/London` or `America/New_York`. This restores the editor's timezone; recipients see their own device's local time first.
@@ -20,13 +20,13 @@ Use whole-minute times in the source timezone. Resolve the user's date and local
 Encode the fragment with `URLSearchParams` or an equivalent URL encoder. For 15 July 2026 at 15:30 in London (UTC+01:00), the UTC instant is 14:30:
 
 ```text
-https://oreid-zd.github.io/meet-time/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=24
+https://meettime.at/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=24
 ```
 
 Once the UTC instant is known, the equivalent JavaScript is:
 
 ```js
-const url = new URL("https://oreid-zd.github.io/meet-time/");
+const url = new URL("https://meettime.at/");
 url.hash = new URLSearchParams({
   at: "2026-07-15T14:30:00.000Z",
   tz: "Europe/London",

@@ -72,7 +72,7 @@ try {
   assert.equal(await sender.locator('#local-time').getAttribute('datetime'), '2026-07-15T14:30:00.000Z');
   await sender.goto(base);
   await sender.locator('#copy:not([disabled])').waitFor();
-  assert.equal(await sender.getByRole('link', { name: 'For AI agents' }).getAttribute('href'), './skills/meettime/SKILL.md');
+  assert.equal(await sender.getByRole('link', { name: 'For AI agents', includeHidden: true }).count(), 0);
   assert.equal(await sender.locator('link[rel="describedby"]').getAttribute('href'), './llms.txt');
   assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');

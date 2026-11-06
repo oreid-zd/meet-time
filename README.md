@@ -46,7 +46,7 @@ https://meettime.at/#at=2026-07-15T14%3A30%3A00.000Z&tz=Europe%2FLondon&format=2
 
 ## For AI agents
 
-Point your agent at the [Meettime skill](https://meettime.at/skills/meettime/SKILL.md) to create share links directly. The homepage links to it, and [llms.txt](https://meettime.at/llms.txt) lists the instructions. Discovery depends on the agent; reading a skill from a URL does not necessarily install it.
+Point your agent at the [Meettime skill](https://meettime.at/skills/meettime/SKILL.md) to create share links directly. [llms.txt](https://meettime.at/llms.txt) lists the instructions, and the homepage advertises it through HTML metadata without a visible footer link. Discovery depends on the agent; reading a skill from a URL does not necessarily install it.
 
 The [discovery index](https://meettime.at/.well-known/agent-skills/index.json) follows the [Agent Skills discovery draft v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc). It points to the same skill and includes its SHA-256 digest. After editing `skills/meettime/SKILL.md`, run `shasum -a 256 skills/meettime/SKILL.md` and update the index's `digest` value (`sha256:` followed by the hash). The browser test checks that they match.
 

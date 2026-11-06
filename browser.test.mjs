@@ -13,6 +13,7 @@ const assets = {
   '.well-known/agent-skills/index.json': 'application/json',
   'vendor/tom-select/tom-select.min.css': 'text/css',
   'vendor/tom-select/tom-select.base.min.js': 'text/javascript',
+  'vendor/tzdb/timezones.mjs': 'text/javascript',
 };
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
@@ -44,6 +45,7 @@ async function assertTimezoneOptionsMatch(page) {
     const picker = document.getElementById(id).tomselect;
     return Object.values(picker.options).map(option => ({
       value: option.value, text: option.text, group: option.optgroup, order: option.$order,
+      search: option.search, country: option.country, description: option.description, abbreviations: option.abbreviations,
     }));
   }));
   assert.deepEqual(options[0], options[1], 'Timezone pickers must share labels, grouping, and order');
@@ -94,6 +96,9 @@ try {
   assert.equal(await sender.locator('#period-ts-control').isVisible(), false);
   assert.equal(await sender.locator('.ts-wrapper').count(), 7);
   for (const input of await sender.locator('.ts-control input').all()) {
+    assert.equal(await input.evaluate(element => getComputedStyle(element).borderRadius), '0px', 'Inner search inputs must not round or clip text selection');
+    assert.equal(await input.evaluate(element => getComputedStyle(element.parentElement).borderRadius),
+      await sender.locator('#date').evaluate(element => getComputedStyle(element).borderRadius), 'The outer control must keep the field rounding');
     assert.equal(await input.evaluate(element => element.dispatchEvent(new ClipboardEvent('paste', {
       bubbles: true, cancelable: true,
     }))), true, 'Dropdowns must not cancel native paste');
@@ -276,6 +281,71 @@ try {
   await assertTimezoneOptionsMatch(pickers);
   assert.equal(await pickers.locator('#preview-timezone').evaluate(select => Boolean(select.tomselect.options['US/Eastern'])), true);
 
+  const searchPage = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB', viewport: { width: 375, height: 812 } });
+  await searchPage.goto(base);
+  await searchPage.locator('#copy:not([disabled])').waitFor();
+  await setFields(searchPage, '2026-07-15', '15', '30', 'Europe/London', '24');
+  await expandPreviews(searchPage);
+  for (const id of ['timezone', 'preview-timezone']) {
+    const input = searchPage.locator(`#${id}-ts-control`);
+    const beforeSearch = searchPage.url();
+    for (const [query, zone] of [
+      ['PST', 'America/Los_Angeles'], ['PDT', 'America/Los_Angeles'],
+      ['AEDT', 'Australia/Sydney'], ['AEST', 'Australia/Sydney'],
+      ['SGP', 'Asia/Singapore'], ['SGT', 'Asia/Singapore'],
+      ['Wellington, New Zealand', 'Pacific/Auckland'],
+      ['  WELLINGTON / new-zealand  ', 'Pacific/Auckland'],
+      ['Mumbai', 'Asia/Calcutta'], ['US/Pacific', 'America/Los_Angeles'],
+    ]) {
+      await input.fill(query);
+      await searchPage.locator(`#${id}-ts-dropdown [data-value="${zone}"]`).waitFor();
+      assert.equal(searchPage.url(), beforeSearch, 'Searching must not change the meeting');
+    }
+    await input.fill('IST');
+    assert.deepEqual(await searchPage.locator(`#${id}-ts-dropdown [data-selectable]`).evaluateAll(options => options.map(option => option.dataset.value).sort()),
+      ['Asia/Calcutta', 'Asia/Colombo', 'Asia/Jerusalem', 'Europe/Dublin']);
+    for (const [zone, country] of [['Asia/Calcutta', 'India'], ['Asia/Colombo', 'Sri Lanka'], ['Europe/Dublin', 'Ireland'], ['Asia/Jerusalem', 'Israel']]) {
+      assert.match(await searchPage.locator(`#${id}-ts-dropdown [data-value="${zone}"]`).innerText(), new RegExp(country));
+    }
+    await input.fill('Wellington, New Zealand');
+    const wellington = searchPage.locator(`#${id}-ts-dropdown [data-value="Pacific/Auckland"]`);
+    assert.match(await wellington.innerText(), /New Zealand.*Wellington/s);
+    assert.match(await wellington.innerText(), /GMT\+12:00/);
+    assert.equal(await searchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await searchPage.keyboard.press('Escape');
+  }
+  await searchPage.locator('#preview-timezone-ts-control').fill('Wellington, New Zealand');
+  await searchPage.locator('#preview-timezone-ts-dropdown [data-value="Pacific/Auckland"]').click();
+  await searchPage.locator('#add-timezone').click();
+  assert.deepEqual(new URLSearchParams(new URL(searchPage.url()).hash.slice(1)).getAll('preview'), ['Pacific/Auckland']);
+  const addedSummary = searchPage.locator('#timezone-previews .timezone-summary');
+  assert.equal(await addedSummary.locator('.timezone-title').innerText(), 'Pacific / Auckland · GMT+12:00');
+  assert.equal(await addedSummary.locator('.timezone-offset').evaluate(el => getComputedStyle(el).whiteSpace), 'nowrap');
+  assert.equal(await addedSummary.locator('.timezone-detail').innerText(), 'New Zealand · New Zealand Time (NZST / NZDT)');
+  assert.equal(await addedSummary.locator('.timezone-cities').innerText(), 'Auckland, Christchurch, Wellington, Manukau City');
+  for (const id of ['timezone', 'preview-timezone']) {
+    await searchPage.locator(`#${id}-ts-control`).fill('Wellington');
+    const option = searchPage.locator(`#${id}-ts-dropdown [data-value="Pacific/Auckland"]`);
+    for (const selector of ['.timezone-title', '.timezone-detail', '.timezone-cities']) {
+      assert.equal(await option.locator(selector).innerText(), await addedSummary.locator(selector).innerText());
+      assert.equal(await option.locator(selector).evaluate(el => getComputedStyle(el).fontSize),
+        await addedSummary.locator(selector).evaluate(el => getComputedStyle(el).fontSize));
+    }
+    await searchPage.keyboard.press('Escape');
+  }
+  assert.equal(await searchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await setFields(searchPage, '2026-01-15', '15', '30', 'Europe/London', '24');
+  await searchPage.locator('#preview-timezone-ts-control').fill('Wellington');
+  assert.match(await searchPage.locator('#preview-timezone-ts-dropdown [data-value="Pacific/Auckland"]').innerText(), /GMT\+13:00/);
+  assert.match(await addedSummary.locator('.timezone-title').innerText(), /GMT\+13:00/);
+  await searchPage.keyboard.press('Escape');
+  await setFields(searchPage, '1970-01-01', '01', '00', 'Europe/London', '24');
+  assert.equal(await searchPage.locator('#local-time').getAttribute('datetime'), '1970-01-01T00:00:00.000Z');
+  await searchPage.locator('#preview-timezone-ts-control').fill('Wellington');
+  assert.match(await searchPage.locator('#preview-timezone-ts-dropdown [data-value="Pacific/Auckland"]').innerText(), /GMT\+12:00/);
+  await searchPage.keyboard.press('Escape');
+  await searchPage.context().close();
+
   const aligned = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB' });
   await aligned.goto(base + '#at=2026-07-15T14%3A30%3A00.000Z&tz=UTC&format=24');
   await aligned.locator('#copy:not([disabled])').waitFor();
@@ -310,6 +380,16 @@ try {
     await assertTimezoneOptionsMatch(aligned);
   }
   await aligned.context().close();
+
+  const missingSearchData = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
+  await missingSearchData.route('**/vendor/tzdb/**', route => route.abort());
+  await missingSearchData.goto(link);
+  await missingSearchData.locator('#copy:not([disabled])').waitFor();
+  await missingSearchData.locator('#timezone-ts-control').fill('Tokyo');
+  await missingSearchData.locator('#timezone-ts-dropdown .active[data-value="Asia/Tokyo"]').waitFor();
+  await missingSearchData.keyboard.press('Enter');
+  assert.equal(await missingSearchData.locator('#timezone').inputValue(), 'Asia/Tokyo');
+  await missingSearchData.context().close();
 
   // Optional enhancement failure must leave usable native selects.
   const fallback = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
@@ -556,7 +636,7 @@ try {
   assert.equal(await previews.evaluate(() => window.storageWrites), writesBeforeDuplicate);
   assert.match(await previews.locator('#preview-status').innerText(), /already/);
   assert.match(await previews.locator('.preview-date').first().innerText(), /Thu, 16 Jul 2026/);
-  assert.match(await previews.locator('#timezone-previews .local-zone').first().innerText(), /GMT\+09:00/);
+  assert.match(await previews.locator('#timezone-previews .timezone-title').first().innerText(), /GMT\+09:00/);
   assert.deepEqual(JSON.parse(await savedZones()), ['Asia/Tokyo', 'America/Los_Angeles']);
   const previewLink = await previews.locator('#share-url').inputValue();
   assert.deepEqual(new URLSearchParams(new URL(previewLink).hash.slice(1)).getAll('preview'), ['Asia/Tokyo', 'America/Los_Angeles']);
@@ -645,7 +725,7 @@ try {
   await previews.locator('#copy:not([disabled])').waitFor();
   assert.deepEqual(await previewTimes(), ['3:30']);
   await expandPreviews(previews);
-  assert.match(await previews.locator('#timezone-previews .local-zone').innerText(), /GMT-04:00/);
+  assert.match(await previews.locator('#timezone-previews .timezone-title').innerText(), /GMT-04:00/);
   const limitHash = new URL(previewLink);
   for (const zone of Intl.supportedValuesOf('timeZone').slice(0, 20)) limitHash.hash += '&preview=' + encodeURIComponent(zone);
   await previews.goto(limitHash.href);

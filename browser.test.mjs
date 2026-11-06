@@ -8,7 +8,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 
 const root = new URL('.', import.meta.url);
 const assets = {
-  'index.html': 'text/html', 'style.css': 'text/css', 'app.mjs': 'text/javascript', 'time.mjs': 'text/javascript',
+  'index.html': 'text/html', 'style.css': 'text/css', 'app.mjs': 'text/javascript', 'time.mjs': 'text/javascript', 'analytics.mjs': 'text/javascript',
   'llms.txt': 'text/plain', 'skills/meettime/SKILL.md': 'text/plain',
   '.well-known/agent-skills/index.json': 'application/json',
   'vendor/tom-select/tom-select.min.css': 'text/css',
@@ -371,8 +371,162 @@ try {
   await choose(sender, 'hour-format', '24');
   assert.equal(await sender.locator('#date').inputValue(), '');
   assert.equal(await sender.locator('#copy').isDisabled(), true);
+  const analytics = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
+  await analytics.route(/^https?:\/\/(meettime\.at|localhost|127\.0\.0\.1|\[::1\]|example\.com)(:\d+)?\//, async route => {
+    const url = new URL(route.request().url());
+    await route.fulfill({ response: await analytics.request.get(base + url.pathname.slice(1)) });
+  });
+  await analytics.route('https://*.posthog.com/**', route => {
+    if (!route.request().url().endsWith('/static/array.js')) return route.abort();
+    return route.fulfill({ contentType: 'text/javascript', body: `
+      window.analyticsEvents = [];
+      window.posthog = {
+        init(token, config) {
+          window.analyticsConfig = { ...config, token };
+          window.filterEvent = config.before_send;
+          window.startAnalytics = () => config.loaded(this);
+          if (location.search !== '?defer') window.startAnalytics();
+        },
+        capture(event, properties = {}) {
+          if (window.failAnalytics) throw new Error('Analytics unavailable');
+          const result = window.filterEvent({ event, properties: {
+            distinct_id: 'anonymous', $session_id: 'session', $browser: 'Chrome',
+            $current_url: location.href, $referrer: 'https://example.com/private?secret=yes',
+            $session_entry_url: location.href, $initial_current_url: location.href,
+            $set: { timezone: 'Europe/London' }, $set_once: { url: location.href },
+            meeting_date: '2026-07-15', timezone: 'unexpected-timezone',
+            entry_type: 'unexpected-entry', different_timezone: 'unexpected-zone', environment: 'wrong', ...properties,
+          } });
+          if (result) window.analyticsEvents.push(result);
+        },
+      };
+    ` });
+  });
+  await analytics.goto('https://meettime.at/?private=secret' + new URL(link).hash, { referer: 'https://example.com/private?secret=yes' });
+  await analytics.locator('#copy:not([disabled])').waitFor();
+  await analytics.waitForFunction(() => window.analyticsEvents?.length === 2);
+  assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents.map(event => event.event)), ['$pageview', 'shared_link_opened']);
+  const config = await analytics.evaluate(() => window.analyticsConfig);
+  assert.equal(config.token, 'phc_unb7fV3zLmVUAKCJW7DDwK4BpvKoaqxwicpnhLh8ijpw');
+  assert.equal(config.api_host, 'https://us.i.posthog.com');
+  for (const key of ['autocapture', 'capture_pageview', 'capture_pageleave']) assert.equal(config[key], false);
+  for (const key of ['disable_persistence', 'disable_session_recording', 'disable_surveys', 'advanced_disable_flags', 'respect_dnt']) assert.equal(config[key], true);
+  assert.equal(config.person_profiles, 'never');
+  assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents[0].properties), {
+    distinct_id: 'anonymous', $session_id: 'session', $browser: 'Chrome', $geoip_disable: true,
+    $current_url: 'https://meettime.at/', $host: 'meettime.at', $pathname: '/',
+    entry_type: 'shared', environment: 'production',
+    $referrer: 'https://example.com', $referring_domain: 'example.com',
+  });
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.different_timezone), true);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.entry_type), undefined);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.timezone), undefined);
+  assert.equal(await analytics.evaluate(() => window.filterEvent({ event: '$autocapture', properties: {} })), null);
+  await choose(analytics, 'minute', '45');
+  await analytics.evaluate(hash => { location.hash = hash; }, new URL(link).hash);
+  await analytics.waitForFunction(() => document.getElementById('minute').value === '30');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), 2);
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+    writeText: () => new Promise(resolve => { window.finishCopy = resolve; }),
+  } }));
+  await analytics.locator('#copy').click();
+  await analytics.waitForFunction(() => typeof window.finishCopy === 'function');
+  await choose(analytics, 'timezone', 'Asia/Tokyo');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), 2);
+  await analytics.evaluate(() => window.finishCopy());
+  await analytics.waitForFunction(() => window.analyticsEvents.length === 3);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).event), 'link_copied');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.timezone), 'Europe/London');
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
+  await analytics.locator('#copy').click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.timezone), 'Asia/Tokyo');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.entry_type), undefined);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.different_timezone), undefined);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.meeting_date), undefined);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.$set), undefined);
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => { throw new Error('denied'); } } }));
+  await analytics.locator('#copy').click();
+  assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents.map(event => event.event)), ['$pageview', 'shared_link_opened', 'link_copied', 'link_copied', 'copy_failed']);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.timezone), undefined);
+  assert.equal(await analytics.locator('#copy-fallback').isVisible(), true);
+  await analytics.evaluate(() => {
+    window.failAnalytics = true;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } });
+  });
+  await analytics.locator('#copy').click();
+  assert.equal(await analytics.locator('#copy-label').innerText(), 'Copied!');
+  assert.equal(await analytics.locator('#copy-fallback').isVisible(), false);
+  await analytics.goto('https://meettime.at/?defer');
+  await analytics.locator('#copy:not([disabled])').waitFor();
+  await analytics.waitForFunction(() => typeof window.startAnalytics === 'function');
+  await choose(analytics, 'timezone', 'Asia/Tokyo');
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
+  await analytics.locator('#copy').click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), 0);
+  await analytics.evaluate(() => window.startAnalytics());
+  assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents.map(event => event.event)), ['$pageview', 'link_copied']);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.timezone), 'Asia/Tokyo');
+  for (const hash of ['', '#at=garbage&tz=UTC']) {
+    await analytics.goto('about:blank');
+    await analytics.goto('https://meettime.at/' + hash);
+    await analytics.waitForFunction(() => window.analyticsEvents?.length === 1);
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].event), '$pageview');
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.entry_type), hash ? 'invalid' : 'new');
+  }
+  for (const zone of ['UTC', 'Etc/UTC', 'Asia/Tokyo']) {
+    const hash = new URLSearchParams({ at: '2026-07-15T14:30:00.000Z', tz: zone });
+    await analytics.goto('about:blank');
+    await analytics.goto('https://meettime.at/#' + hash);
+    await analytics.waitForFunction(() => window.analyticsEvents?.length === 2);
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.different_timezone), zone === 'Asia/Tokyo');
+  }
+  for (const host of ['localhost', '127.0.0.1', '[::1]']) {
+    await analytics.goto(`http://${host}:8000/`);
+    await analytics.locator('#copy:not([disabled])').waitFor();
+    assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
+    await analytics.goto(`http://${host}:8000/?analytics=1`);
+    await analytics.waitForFunction(() => window.analyticsEvents?.length === 1);
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.environment), 'development');
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.entry_type), 'new');
+    assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.$current_url), `http://${host}:8000/`);
+  }
+  await choose(analytics, 'timezone', 'Asia/Tokyo');
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
+  await analytics.locator('#copy').click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.timezone), 'Asia/Tokyo');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.environment), 'development');
+  const localLink = await analytics.locator('#share-url').inputValue();
+  await analytics.goto('about:blank');
+  await analytics.goto(localLink);
+  await analytics.waitForFunction(() => window.analyticsEvents?.length === 2);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.entry_type), 'shared');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.different_timezone), true);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.environment), 'development');
+  await analytics.goto('https://example.com/?analytics=1');
+  await analytics.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
+  await analytics.route('https://*.posthog.com/**', route => route.abort());
+  await analytics.goto('https://meettime.at/' + new URL(link).hash);
+  await analytics.locator('#copy:not([disabled])').waitFor();
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
+  await analytics.locator('#copy').click();
+  assert.equal(await analytics.locator('#copy-label').innerText(), 'Copied!');
+  await analytics.addInitScript(() => {
+    const params = new URLSearchParams(location.search);
+    Object.defineProperty(navigator, 'doNotTrack', { value: params.has('dnt') ? '1' : null });
+    Object.defineProperty(navigator, 'globalPrivacyControl', { value: params.has('gpc') });
+  });
+  for (const origin of ['https://meettime.at/?', base + '?analytics=1&']) {
+    for (const signal of ['dnt', 'gpc']) {
+      await analytics.goto(origin + signal);
+      await analytics.locator('#copy:not([disabled])').waitFor();
+      assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
+    }
+  }
+  assert.equal(await sender.locator('script[src*="posthog.com"]').count(), 0);
+  await analytics.context().close();
   assert.deepEqual(errors, []);
-  console.log('Passed: skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
+  console.log('Passed: analytics events/privacy and blocked SDK, skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
   console.log(`Screenshots saved in ${tmpdir()}`);
 } finally {
   await browser.close();

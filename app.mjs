@@ -1,17 +1,67 @@
 import { partsAt, possibleInstants, readSelection, selectionURL, normalizePreviewZones, MAX_PREVIEW_ZONES } from './time.mjs';
 import { track } from './analytics.mjs';
+const timezoneMetadata = await import('./vendor/tzdb/timezones.mjs').then(module => module.default).catch(() => []);
 
 const $ = id => document.getElementById(id);
 const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 const zoneLabel = zone => zone.replaceAll('_', ' ').replaceAll('/', ' / ');
+const normalizeZoneSearch = text => text.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const metadataByZone = new Map(timezoneMetadata.flatMap(data => data.group.map(zone => [zone, data])));
+const knownAbbreviations = new Set(timezoneMetadata.flatMap(data => [data.abbreviation, data.dstAbbreviation]).filter(Boolean));
+
+function timezoneOption(zone) {
+  const option = new Option(zoneLabel(zone), zone);
+  const data = metadataByZone.get(zone);
+  if (data) {
+    option.dataset.abbreviations = [data.abbreviation, data.dstAbbreviation].filter(Boolean).join(' ');
+    const abbreviations = option.dataset.abbreviations.replaceAll(' ', ' / ');
+    option.dataset.country = data.countryName;
+    option.dataset.description = `${data.alternativeName} (${abbreviations}) · ${data.mainCities.join(', ')}`;
+    option.dataset.search = normalizeZoneSearch([
+      ...data.group, data.countryName, data.countryCode, option.dataset.description,
+      data.countryCode === 'SG' ? 'SGP' : '',
+    ].join(' '));
+  }
+  return option;
+}
 const format = (instant, timeZone, options) => new Intl.DateTimeFormat(undefined, {
   timeZone, hourCycle: $('hour-format').value === '12' ? 'h12' : 'h23', ...options,
 }).format(new Date(instant));
 
-function zoneDescription(instant, timeZone) {
-  const offset = new Intl.DateTimeFormat('en', { timeZone, timeZoneName: 'longOffset' })
+function zoneOffset(instant, timeZone) {
+  return new Intl.DateTimeFormat('en', { timeZone, timeZoneName: 'longOffset' })
     .formatToParts(instant).find(part => part.type === 'timeZoneName').value;
-  return `${zoneLabel(timeZone)} · ${offset}`;
+}
+
+function zoneDescription(instant, timeZone) {
+  return `${zoneLabel(timeZone)} · ${zoneOffset(instant, timeZone)}`;
+}
+
+function timezoneSummary(instant, zone) {
+  const summary = document.createElement('div');
+  summary.className = 'timezone-summary';
+  const title = document.createElement('strong');
+  title.className = 'timezone-title';
+  title.textContent = zoneLabel(zone);
+  if (Number.isFinite(instant)) {
+    const offset = document.createElement('span');
+    offset.className = 'timezone-offset';
+    offset.textContent = zoneOffset(instant, zone);
+    title.append(' · ', offset);
+  }
+  summary.append(title);
+  const data = metadataByZone.get(zone);
+  if (data) {
+    const detail = document.createElement('p');
+    detail.className = 'timezone-detail';
+    const abbreviations = [data.abbreviation, data.dstAbbreviation].filter(Boolean).join(' / ');
+    detail.textContent = `${data.countryName} · ${data.alternativeName} (${abbreviations})`;
+    const cities = document.createElement('p');
+    cities.className = 'timezone-cities';
+    cities.textContent = data.mainCities.join(', ');
+    summary.append(detail, cities);
+  }
+  return summary;
 }
 
 function selectedHour() {
@@ -64,13 +114,7 @@ function renderPreviews() {
   $('preview-count').textContent = previewZones.length ? ` · ${previewZones.length}` : '';
   $('timezone-previews').replaceChildren(...previewZones.map(zone => {
     const row = document.createElement('li');
-    const details = document.createElement('div');
-    const city = document.createElement('strong');
-    city.className = 'preview-city';
-    city.textContent = zone.split('/').at(-1).replaceAll('_', ' ');
-    const label = document.createElement('p');
-    label.className = 'local-zone';
-    label.textContent = Number.isFinite(instant) ? zoneDescription(instant, zone) : zoneLabel(zone);
+    const details = timezoneSummary(instant, zone);
     const time = document.createElement('time');
     time.className = 'preview-time';
     time.textContent = Number.isFinite(instant) ? format(instant, zone, { hour: 'numeric', minute: '2-digit' }) : '--:--';
@@ -92,7 +136,6 @@ function renderPreviews() {
       const buttons = $('timezone-previews').querySelectorAll('button');
       (buttons[Math.min(index, buttons.length - 1)] || $('add-timezone')).focus();
     });
-    details.append(city, label);
     const timing = document.createElement('div');
     timing.className = 'preview-timing';
     timing.append(time, date);
@@ -184,6 +227,7 @@ function update(preferredInstant) {
   } catch (error) {
     showError(error.message);
   } finally {
+    for (const id of ['timezone', 'preview-timezone']) $(id).tomselect?.clearCache();
     syncPicker('occurrence');
   }
 }
@@ -224,8 +268,9 @@ function load() {
   const parts = partsAt(instant, timeZone);
   if (![...$('timezone').options].some(option => option.value === timeZone)) {
     for (const id of ['timezone', 'preview-timezone']) {
-      $(id).add(new Option(zoneLabel(timeZone), timeZone));
-      $(id).tomselect?.addOption({ value: timeZone, text: zoneLabel(timeZone) });
+      const option = timezoneOption(timeZone);
+      $(id).add(option);
+      $(id).tomselect?.addOption({ value: timeZone, text: option.text, ...option.dataset });
     }
   }
   $('date').value = parts.date;
@@ -266,7 +311,7 @@ try {
       group.label = label;
       groups.set(label, group);
     }
-    groups.get(label).append(new Option(zoneLabel(zone), zone));
+    groups.get(label).append(timezoneOption(zone));
   }
   $('timezone').replaceChildren(...groups.values());
   $('preview-timezone').append(...[...groups.values()].map(group => group.cloneNode(true)));
@@ -332,15 +377,33 @@ function enhancePicker(select) {
     dropdownParent: 'body',
     copyClassesToDropdown: true,
     lockOptgroupOrder: true,
-    searchField: ['text', 'value'],
-    sortField: [{ field: '$order' }, { field: '$score' }],
+    searchField: timezonePicker ? ['text', 'value', 'search'] : ['text', 'value'],
+    render: timezonePicker ? {
+      option(data) {
+        return timezoneSummary(Date.parse($('local-time').getAttribute('datetime')), data.value);
+      },
+    } : {},
+    score: timezonePicker ? function(query) {
+      const score = this.getScoreFunction(query);
+      const abbreviation = query.toUpperCase();
+      return knownAbbreviations.has(abbreviation)
+        ? data => Number((data.abbreviations || '').split(' ').includes(abbreviation))
+        : score;
+    } : undefined,
+    sortField: timezonePicker
+      ? [{ field: '$score', direction: 'desc' }, { field: '$order' }]
+      : [{ field: '$order' }, { field: '$score' }],
     placeholder: { timezone: 'Search city or timezone', 'preview-timezone': 'Search city or timezone', occurrence: 'Choose first or second' }[id] || 'Search',
     onDelete: () => false,
     openOnFocus: !timezonePicker,
   });
   // Single-select search needs native paste, not Tom Select's multi-item paste handler.
   picker.hook('instead', 'onPaste', () => {});
-  if (timezonePicker) picker.hook('instead', 'onClick', () => picker.open());
+  if (timezonePicker) {
+    picker.hook('instead', 'onClick', () => picker.open());
+    const search = picker.search.bind(picker);
+    picker.hook('instead', 'search', query => search(normalizeZoneSearch(query)));
+  }
   picker.control_input.setAttribute('aria-autocomplete', 'list');
   if (select.hasAttribute('aria-label')) picker.control_input.removeAttribute('aria-labelledby');
   if (select.hasAttribute('aria-describedby')) {

@@ -2,9 +2,9 @@
 
 > Share a meeting time with a link. Each recipient sees it in their own timezone.
 
-Agents can construct share links directly without opening a browser or calling an API. Meeting parameters belong in the URL fragment (`#`), not the query string. Creating a link does not schedule a meeting or send invitations.
+Agents can construct share links directly, including optional previews of the same instant in up to 10 additional timezones, without opening a browser or calling an API. Meeting parameters belong in the URL fragment (`#`), not the query string. Creating a link does not schedule a meeting or send invitations.
 
 ## Instructions
 
-- [Meettime skill](https://meettime.at/skills/meettime/SKILL.md): URL parameters, timezone and daylight-saving guidance, and a complete example.
+- [Meettime skill](https://meettime.at/skills/meettime/SKILL.md): URL parameters (including repeated `preview` timezones), daylight-saving guidance, and complete single-zone and multi-zone examples.
 - [Skill discovery index](https://meettime.at/.well-known/agent-skills/index.json): Agent Skills discovery draft v0.2.0 metadata and checksum.

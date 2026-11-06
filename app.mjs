@@ -1,4 +1,4 @@
-import { partsAt, possibleInstants, readSelection, selectionURL } from './time.mjs';
+import { partsAt, possibleInstants, readSelection, selectionURL, normalizePreviewZones, MAX_PREVIEW_ZONES } from './time.mjs';
 import { track } from './analytics.mjs';
 
 const $ = id => document.getElementById(id);
@@ -54,7 +54,70 @@ function setHour(hour) {
   syncPicker('period');
 }
 
+const previewStorageKey = 'meettime.preview-timezones';
+let previewZones = [];
+let previewSource = 'empty';
 let copyResetTimer;
+
+function renderPreviews() {
+  const instant = Date.parse($('local-time').getAttribute('datetime'));
+  $('preview-count').textContent = previewZones.length ? ` · ${previewZones.length}` : '';
+  $('timezone-previews').replaceChildren(...previewZones.map(zone => {
+    const row = document.createElement('li');
+    const details = document.createElement('div');
+    const city = document.createElement('strong');
+    city.className = 'preview-city';
+    city.textContent = zone.split('/').at(-1).replaceAll('_', ' ');
+    const label = document.createElement('p');
+    label.className = 'local-zone';
+    label.textContent = Number.isFinite(instant) ? zoneDescription(instant, zone) : zoneLabel(zone);
+    const time = document.createElement('time');
+    time.className = 'preview-time';
+    time.textContent = Number.isFinite(instant) ? format(instant, zone, { hour: 'numeric', minute: '2-digit' }) : '--:--';
+    if (Number.isFinite(instant)) time.dateTime = new Date(instant).toISOString();
+    const date = document.createElement('p');
+    date.className = 'preview-date';
+    date.textContent = Number.isFinite(instant)
+      ? format(instant, zone, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+      : 'Choose a valid meeting time';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'secondary';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `Remove ${zoneLabel(zone)}`);
+    remove.addEventListener('click', () => {
+      const index = previewZones.indexOf(zone);
+      previewZones.splice(index, 1);
+      changePreviews('remove');
+      const buttons = $('timezone-previews').querySelectorAll('button');
+      (buttons[Math.min(index, buttons.length - 1)] || $('add-timezone')).focus();
+    });
+    details.append(city, label);
+    const timing = document.createElement('div');
+    timing.className = 'preview-timing';
+    timing.append(time, date);
+    row.append(details, timing, remove);
+    return row;
+  }));
+  const full = previewZones.length >= MAX_PREVIEW_ZONES;
+  $('add-timezone').disabled = full;
+  $('preview-timezone').disabled = full;
+  const picker = $('preview-timezone').tomselect;
+  if (picker) full ? picker.disable() : picker.enable();
+}
+
+function changePreviews(action) {
+  $('preview-status').textContent = '';
+  try {
+    if (action === 'reset') localStorage.removeItem(previewStorageKey);
+    else localStorage.setItem(previewStorageKey, JSON.stringify(previewZones));
+  } catch {
+    $('preview-status').textContent = "Your browser couldn't save this change. It still applies to this link.";
+  }
+  const instant = Date.parse($('local-time').getAttribute('datetime'));
+  update(instant);
+  track('timezone_preview_changed', { action, preview_count: previewZones.length });
+}
 
 function clearShareStatus() {
   clearTimeout(copyResetTimer);
@@ -72,6 +135,7 @@ function showError(message, clearURL = true) {
   $('local-zone').textContent = zoneLabel(viewerZone);
   $('share-url').value = '';
   $('copy').disabled = true;
+  renderPreviews();
   clearShareStatus();
   if (clearURL) history.replaceState(null, '', location.pathname + location.search);
 }
@@ -112,7 +176,8 @@ function update(preferredInstant) {
     $('local-time').dateTime = new Date(instant).toISOString();
     $('local-date').textContent = format(instant, viewerZone, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     $('local-zone').textContent = zoneDescription(instant, viewerZone);
-    const url = selectionURL(location.href, instant, timeZone, $('hour-format').value);
+    renderPreviews();
+    const url = selectionURL(location.href, instant, timeZone, $('hour-format').value, previewZones);
     history.replaceState(null, '', url);
     $('share-url').value = url;
     $('copy').disabled = false;
@@ -131,6 +196,26 @@ function load() {
   } catch (error) {
     linkError = error.message;
   }
+  $('other-timezones').open = false;
+  previewZones = selection?.previewZones || [];
+  previewSource = selection ? 'link' : 'empty';
+  $('preview-status').textContent = '';
+  if (!location.hash || location.hash === '#') {
+    try {
+      previewZones = normalizePreviewZones(JSON.parse(localStorage.getItem(previewStorageKey)));
+      if (previewZones.length) previewSource = 'saved';
+    } catch {
+      // Storage is optional; sharing must work without it.
+    }
+  }
+  if (selection && new URLSearchParams(location.hash.slice(1)).getAll('preview').length > previewZones.length) {
+    $('preview-status').textContent = 'Some duplicate, unsupported or excess timezones were omitted.';
+  }
+  $('preview-timezone').value = '';
+  $('preview-timezone').tomselect?.close();
+  $('preview-timezone').tomselect?.clear(true);
+  $('preview-timezone').setCustomValidity('');
+  ($('preview-timezone').tomselect?.control_input || $('preview-timezone')).removeAttribute('aria-invalid');
   // Put the visitor's local time first when opening a shared link, including for screen readers.
   $('meeting').prepend(selection ? $('preview') : $('editor'));
   const timeZone = selection?.timeZone || viewerZone;
@@ -138,7 +223,10 @@ function load() {
   const instant = selection?.instant ?? (Math.floor(Date.now() / 900_000) + 1) * 900_000;
   const parts = partsAt(instant, timeZone);
   if (![...$('timezone').options].some(option => option.value === timeZone)) {
-    $('timezone').add(new Option(zoneLabel(timeZone), timeZone));
+    for (const id of ['timezone', 'preview-timezone']) {
+      $(id).add(new Option(zoneLabel(timeZone), timeZone));
+      $(id).tomselect?.addOption({ value: timeZone, text: zoneLabel(timeZone) });
+    }
   }
   $('date').value = parts.date;
   $('hour-format').value = selection?.hourFormat || '24';
@@ -181,14 +269,17 @@ try {
     groups.get(label).append(new Option(zoneLabel(zone), zone));
   }
   $('timezone').replaceChildren(...groups.values());
+  $('preview-timezone').append(...[...groups.values()].map(group => group.cloneNode(true)));
   $('fields').disabled = false;
+  $('other-timezones').hidden = false;
   const selection = load();
   if (selection) {
     const meetingZone = new Intl.DateTimeFormat('en', { timeZone: selection.timeZone }).resolvedOptions().timeZone;
-    track('shared_link_opened', { different_timezone: meetingZone !== viewerZone });
+    track('shared_link_opened', { different_timezone: meetingZone !== viewerZone, preview_count: previewZones.length });
   }
 } catch {
   $('fields').disabled = true;
+  $('other-timezones').hidden = true;
   showError("Couldn't load the timezone converter. Try the latest version of your browser.", false);
 }
 
@@ -209,10 +300,11 @@ $('copy').addEventListener('click', async () => {
   const url = $('share-url').value;
   if (!url) return;
   const timeZone = $('timezone').value;
+  const previewCount = previewZones.length;
   clearShareStatus();
   try {
     await navigator.clipboard.writeText(url);
-    track('link_copied', { timezone: timeZone });
+    track('link_copied', { timezone: timeZone, preview_count: previewCount });
     if ($('share-url').value === url) {
       clearShareStatus();
       $('copy-label').textContent = 'Copied!';
@@ -229,29 +321,81 @@ $('copy').addEventListener('click', async () => {
 });
 
 // Use the same picker for every dropdown, with native selects as a fallback.
-if (window.TomSelect && !$('fields').disabled) {
-  for (const select of $('fields').querySelectorAll('select')) {
-    const id = select.id;
-    const picker = new window.TomSelect(select, {
-      create: false,
-      maxOptions: null,
-      refreshThrottle: 0,
-      dropdownParent: 'body',
-      copyClassesToDropdown: true,
-      lockOptgroupOrder: true,
-      searchField: ['text', 'value'],
-      sortField: [{ field: '$order' }, { field: '$score' }],
-      placeholder: { timezone: 'Search city or timezone', occurrence: 'Choose first or second' }[id] || 'Search',
-      onDelete: () => false,
-    });
-    // Single-select search needs native paste, not Tom Select's multi-item paste handler.
-    picker.hook('instead', 'onPaste', () => {});
-    picker.control_input.setAttribute('aria-autocomplete', 'list');
-    if (select.hasAttribute('aria-label')) picker.control_input.removeAttribute('aria-labelledby');
-    if (select.hasAttribute('aria-describedby')) {
-      picker.control_input.setAttribute('aria-describedby', select.getAttribute('aria-describedby'));
-    }
-    select.setAttribute('aria-hidden', 'true');
-    picker.wrapper.hidden = select.hidden;
+function enhancePicker(select) {
+  if (!window.TomSelect || select.tomselect) return;
+  const id = select.id;
+  const timezonePicker = ['timezone', 'preview-timezone'].includes(id);
+  const picker = new window.TomSelect(select, {
+    create: false,
+    maxOptions: null,
+    refreshThrottle: 0,
+    dropdownParent: 'body',
+    copyClassesToDropdown: true,
+    lockOptgroupOrder: true,
+    searchField: ['text', 'value'],
+    sortField: [{ field: '$order' }, { field: '$score' }],
+    placeholder: { timezone: 'Search city or timezone', 'preview-timezone': 'Search city or timezone', occurrence: 'Choose first or second' }[id] || 'Search',
+    onDelete: () => false,
+    openOnFocus: !timezonePicker,
+  });
+  // Single-select search needs native paste, not Tom Select's multi-item paste handler.
+  picker.hook('instead', 'onPaste', () => {});
+  if (timezonePicker) picker.hook('instead', 'onClick', () => picker.open());
+  picker.control_input.setAttribute('aria-autocomplete', 'list');
+  if (select.hasAttribute('aria-label')) picker.control_input.removeAttribute('aria-labelledby');
+  if (select.hasAttribute('aria-describedby')) {
+    picker.control_input.setAttribute('aria-describedby', select.getAttribute('aria-describedby'));
   }
+  select.setAttribute('aria-hidden', 'true');
+  picker.wrapper.hidden = select.hidden;
 }
+
+if (!$('fields').disabled) {
+  for (const select of $('fields').querySelectorAll('select')) enhancePicker(select);
+}
+
+$('other-timezones').addEventListener('toggle', () => {
+  if ($('other-timezones').open) {
+    track('timezone_preview_opened', { preview_count: previewZones.length, source: previewSource });
+  } else $('preview-timezone').tomselect?.close();
+});
+
+function previewValidation(message) {
+  const select = $('preview-timezone');
+  select.setCustomValidity(message);
+  const control = select.tomselect?.control_input || select;
+  control.setAttribute('aria-invalid', String(Boolean(message)));
+  $('preview-status').textContent = message;
+  if (message) control.focus();
+}
+
+$('preview-timezone').addEventListener('change', () => previewValidation(''));
+$('preview-add-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const select = $('preview-timezone');
+  if (select.disabled) return;
+  if (!select.value) {
+    previewValidation('Choose a timezone before adding it.');
+    return;
+  }
+  const next = normalizePreviewZones([...previewZones, select.value]);
+  if (next.length === previewZones.length) {
+    previewValidation('That timezone is already in your previews.');
+    return;
+  }
+  previewValidation('');
+  previewZones = next;
+  select.value = '';
+  select.tomselect?.clear(true);
+  changePreviews('add');
+  if (select.disabled) $('reset-timezones').focus();
+});
+$('reset-timezones').addEventListener('click', () => {
+  previewValidation('');
+  $('preview-timezone').value = '';
+  $('preview-timezone').tomselect?.clear(true);
+  previewZones = [];
+  changePreviews('reset');
+});
+if (!$('fields').disabled) enhancePicker($('preview-timezone'));
+$('meeting').setAttribute('aria-busy', 'false');

@@ -29,7 +29,7 @@
       <noscript><p class="error">Enable JavaScript to convert timezones and create a link.</p></noscript>
       <p id="error" class="error" role="alert" hidden></p>
 
-      <div id="meeting" class="meeting">
+      <div id="meeting" class="meeting" aria-busy="true">
         <section id="editor" class="editor" aria-labelledby="editor-heading">
           <form id="meeting-form">
             <fieldset id="fields" disabled>
@@ -82,6 +82,24 @@
             <p id="local-date" class="local-date">Choose a meeting time</p>
             <p id="local-zone" class="local-zone">Your device's timezone</p>
           </div>
+          <details id="other-timezones" hidden>
+            <summary>Other timezones<span id="preview-count"></span></summary>
+            <ul id="timezone-previews" class="timezone-previews"></ul>
+            <form id="preview-add-form" class="field" novalidate>
+              <label for="preview-timezone">Add timezone</label>
+              <div class="preview-add-controls">
+                <select id="preview-timezone" aria-describedby="preview-hint preview-status" required>
+                  <option value="">Search city or timezone</option>
+                </select>
+                <button id="add-timezone" type="submit">Add timezone</button>
+              </div>
+              <p id="preview-hint" class="field-hint">Up to 10 timezones. Changes are remembered on this browser for new meetings.</p>
+              <p id="preview-status" class="field-hint" role="status"></p>
+            </form>
+            <div class="preview-actions">
+              <button id="reset-timezones" class="secondary" type="button">Reset timezones</button>
+            </div>
+          </details>
           <p id="copy-status" class="copy-status" role="status"></p>
           <div id="copy-fallback" class="field" hidden>
             <label for="share-url">Copy this link</label>

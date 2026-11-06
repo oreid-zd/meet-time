@@ -19,12 +19,13 @@ export function track(event, properties = {}) {
 
 if (enabled) {
   const script = document.createElement('script');
-  script.src = 'https://us-assets.i.posthog.com/static/array.js';
+  script.src = 'https://e.meettime.at/static/array.js';
   script.async = true;
   script.referrerPolicy = 'no-referrer';
   script.onload = () => {
     window.posthog.init('phc_unb7fV3zLmVUAKCJW7DDwK4BpvKoaqxwicpnhLh8ijpw', {
-      api_host: 'https://us.i.posthog.com',
+      api_host: 'https://e.meettime.at',
+      ui_host: 'https://us.posthog.com',
       defaults: '2026-08-30',
       autocapture: false,
       capture_pageview: false,

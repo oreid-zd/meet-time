@@ -377,6 +377,10 @@ try {
     await route.fulfill({ response: await analytics.request.get(base + url.pathname.slice(1)) });
   });
   await analytics.route('https://*.posthog.com/**', route => {
+    errors.push('Unexpected direct PostHog request: ' + route.request().url());
+    return route.abort();
+  });
+  await analytics.route('https://e.meettime.at/**', route => {
     if (!route.request().url().endsWith('/static/array.js')) return route.abort();
     return route.fulfill({ contentType: 'text/javascript', body: `
       window.analyticsEvents = [];
@@ -408,7 +412,9 @@ try {
   assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents.map(event => event.event)), ['$pageview', 'shared_link_opened']);
   const config = await analytics.evaluate(() => window.analyticsConfig);
   assert.equal(config.token, 'phc_unb7fV3zLmVUAKCJW7DDwK4BpvKoaqxwicpnhLh8ijpw');
-  assert.equal(config.api_host, 'https://us.i.posthog.com');
+  assert.equal(config.api_host, 'https://e.meettime.at');
+  assert.equal(config.ui_host, 'https://us.posthog.com');
+  assert.equal(await analytics.locator('script[src="https://e.meettime.at/static/array.js"]').count(), 1);
   for (const key of ['autocapture', 'capture_pageview', 'capture_pageleave']) assert.equal(config[key], false);
   for (const key of ['disable_persistence', 'disable_session_recording', 'disable_surveys', 'advanced_disable_flags', 'respect_dnt']) assert.equal(config[key], true);
   assert.equal(config.person_profiles, 'never');
@@ -483,7 +489,7 @@ try {
   for (const host of ['localhost', '127.0.0.1', '[::1]']) {
     await analytics.goto(`http://${host}:8000/`);
     await analytics.locator('#copy:not([disabled])').waitFor();
-    assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
+    assert.equal(await analytics.locator('script[src*="e.meettime.at"]').count(), 0);
     await analytics.goto(`http://${host}:8000/?analytics=1`);
     await analytics.waitForFunction(() => window.analyticsEvents?.length === 1);
     assert.equal(await analytics.evaluate(() => window.analyticsEvents[0].properties.environment), 'development');
@@ -504,8 +510,8 @@ try {
   assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.environment), 'development');
   await analytics.goto('https://example.com/?analytics=1');
   await analytics.locator('#copy:not([disabled])').waitFor();
-  assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
-  await analytics.route('https://*.posthog.com/**', route => route.abort());
+  assert.equal(await analytics.locator('script[src*="e.meettime.at"]').count(), 0);
+  await analytics.route('https://e.meettime.at/**', route => route.abort());
   await analytics.goto('https://meettime.at/' + new URL(link).hash);
   await analytics.locator('#copy:not([disabled])').waitFor();
   await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
@@ -520,10 +526,10 @@ try {
     for (const signal of ['dnt', 'gpc']) {
       await analytics.goto(origin + signal);
       await analytics.locator('#copy:not([disabled])').waitFor();
-      assert.equal(await analytics.locator('script[src*="posthog.com"]').count(), 0);
+      assert.equal(await analytics.locator('script[src*="e.meettime.at"]').count(), 0);
     }
   }
-  assert.equal(await sender.locator('script[src*="posthog.com"]').count(), 0);
+  assert.equal(await sender.locator('script[src*="e.meettime.at"]').count(), 0);
   await analytics.context().close();
   assert.deepEqual(errors, []);
   console.log('Passed: analytics events/privacy and blocked SDK, skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');

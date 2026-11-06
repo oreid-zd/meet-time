@@ -40,6 +40,23 @@ export function possibleInstants(date, time, timeZone) {
     }).sort((a, b) => a - b);
 }
 
+export const MAX_PREVIEW_ZONES = 10;
+
+export function normalizePreviewZones(values) {
+  if (!Array.isArray(values)) return [];
+  const zones = new Set();
+  for (const value of values) {
+    if (zones.size === MAX_PREVIEW_ZONES) break;
+    if (typeof value !== 'string' || !/^[A-Za-z][A-Za-z0-9_+./-]{0,99}$/.test(value)) continue;
+    try {
+      zones.add(new Intl.DateTimeFormat('en', { timeZone: value }).resolvedOptions().timeZone);
+    } catch {
+      // Optional previews must not invalidate a meeting.
+    }
+  }
+  return [...zones];
+}
+
 export function readSelection(hash) {
   if (!hash || hash === '#') return null;
   const params = new URLSearchParams(hash.replace(/^#/, ''));
@@ -58,11 +75,13 @@ export function readSelection(hash) {
   } catch {
     throw new Error('This link has an invalid time or timezone. Ask for a new link, or choose a time below.');
   }
-  return { instant, timeZone, hourFormat };
+  return { instant, timeZone, hourFormat, previewZones: normalizePreviewZones(params.getAll('preview')) };
 }
 
-export function selectionURL(baseURL, instant, timeZone, hourFormat = '24') {
+export function selectionURL(baseURL, instant, timeZone, hourFormat = '24', previewZones = []) {
   const url = new URL(baseURL);
-  url.hash = new URLSearchParams({ at: new Date(instant).toISOString(), tz: timeZone, format: hourFormat }).toString();
+  const params = new URLSearchParams({ at: new Date(instant).toISOString(), tz: timeZone, format: hourFormat });
+  for (const zone of normalizePreviewZones(previewZones)) params.append('preview', zone);
+  url.hash = params.toString();
   return url.href;
 }

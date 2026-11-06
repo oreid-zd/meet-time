@@ -31,8 +31,22 @@ async function newPage(options) {
   page.on('pageerror', error => errors.push(error.message));
   return page;
 }
+async function expandPreviews(page) {
+  if (!await page.locator('#other-timezones').evaluate(element => element.open)) {
+    await page.locator('#other-timezones > summary').click();
+  }
+}
 async function choose(page, id, value) {
   await page.locator(`#${id}`).evaluate((select, value) => select.tomselect.setValue(value), value);
+}
+async function assertTimezoneOptionsMatch(page) {
+  const options = await page.evaluate(() => ['timezone', 'preview-timezone'].map(id => {
+    const picker = document.getElementById(id).tomselect;
+    return Object.values(picker.options).map(option => ({
+      value: option.value, text: option.text, group: option.optgroup, order: option.$order,
+    }));
+  }));
+  assert.deepEqual(options[0], options[1], 'Timezone pickers must share labels, grouping, and order');
 }
 async function setFields(page, date, hour, minute, zone, hourFormat = '12') {
   await choose(page, 'hour-format', hourFormat);
@@ -75,9 +89,10 @@ try {
   assert.equal(await sender.getByRole('link', { name: 'For AI agents', includeHidden: true }).count(), 0);
   assert.equal(await sender.locator('link[rel="describedby"]').getAttribute('href'), './llms.txt');
   assert.equal(await sender.locator('#timezone').inputValue(), 'Europe/London');
+  assert.equal(await sender.locator('#meeting').getAttribute('aria-busy'), 'false');
   assert.equal(await sender.locator('#hour-format').inputValue(), '24');
   assert.equal(await sender.locator('#period-ts-control').isVisible(), false);
-  assert.equal(await sender.locator('.ts-wrapper').count(), 6);
+  assert.equal(await sender.locator('.ts-wrapper').count(), 7);
   for (const input of await sender.locator('.ts-control input').all()) {
     assert.equal(await input.evaluate(element => element.dispatchEvent(new ClipboardEvent('paste', {
       bubbles: true, cancelable: true,
@@ -123,6 +138,8 @@ try {
   assert.equal(await receiver.locator('#share-url').inputValue(), link);
   assert.equal(await receiver.locator('#meeting > :first-child').getAttribute('id'), 'preview');
   await receiver.locator('#copy').focus();
+  await receiver.keyboard.press('Tab');
+  assert.equal(await receiver.evaluate(() => document.activeElement.tagName), 'SUMMARY');
   await receiver.keyboard.press('Tab');
   assert.equal(await receiver.evaluate(() => document.activeElement.id), 'hour-format-ts-control');
   assert.equal(await receiver.locator('#hour-format').inputValue(), '12');
@@ -220,6 +237,33 @@ try {
   assert.equal(await pickers.locator('#minute').inputValue(), '07');
   assert.equal(new URLSearchParams(new URL(pickers.url()).hash.slice(1)).get('at'), '2026-07-15T19:07:00.000Z');
 
+  for (const viewport of [{ width: 640, height: 450 }, { width: 320, height: 400 }]) {
+    const shortPage = await newPage({ viewport, deviceScaleFactor: 2 });
+    for (const id of ['timezone', 'preview-timezone']) {
+      await shortPage.goto(id === 'timezone' ? link : base);
+      await shortPage.locator('#copy:not([disabled])').waitFor();
+      if (id === 'preview-timezone') {
+        await expandPreviews(shortPage);
+        await shortPage.getByRole('combobox', { name: 'Add timezone', exact: true }).click();
+      } else {
+        await shortPage.getByRole('combobox', { name: 'Timezone', exact: true }).focus();
+        await shortPage.keyboard.press('ArrowDown');
+      }
+      const dropdown = shortPage.locator(`#${id}-ts-dropdown`);
+      await dropdown.waitFor();
+      await shortPage.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const spacing = await dropdown.evaluate(element => ({
+        gap: document.documentElement.scrollHeight - (element.getBoundingClientRect().bottom + scrollY),
+        expected: 1.5 * parseFloat(getComputedStyle(document.documentElement).fontSize),
+      }));
+      assert.ok(spacing.gap >= spacing.expected - 1, 'Dropdowns need bottom breathing room at high zoom');
+      await shortPage.keyboard.press('Escape');
+      await shortPage.locator(`#${id}-ts-dropdown`).waitFor({ state: 'hidden' });
+      assert.equal(await shortPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+    await shortPage.context().close();
+  }
+
   // Hash navigation must refresh the displayed widgets, including aliases absent from the initial list.
   await pickers.evaluate(() => { location.hash = 'at=2026-07-15T14:35:00.000Z&tz=US%2FEastern&format=24'; });
   await pickers.waitForFunction(() => document.getElementById('timezone').tomselect.getValue() === 'US/Eastern');
@@ -228,6 +272,44 @@ try {
   assert.equal(await pickers.locator('#hour-format').evaluate(select => select.tomselect.getValue()), '24');
   assert.equal(await pickers.locator('#hour').evaluate(select => select.tomselect.getValue()), '10');
   assert.equal(await pickers.locator('#period-ts-control').isVisible(), false);
+
+  await assertTimezoneOptionsMatch(pickers);
+  assert.equal(await pickers.locator('#preview-timezone').evaluate(select => Boolean(select.tomselect.options['US/Eastern'])), true);
+
+  const aligned = await newPage({ timezoneId: 'Europe/London', locale: 'en-GB' });
+  await aligned.goto(base + '#at=2026-07-15T14%3A30%3A00.000Z&tz=UTC&format=24');
+  await aligned.locator('#copy:not([disabled])').waitFor();
+  await assertTimezoneOptionsMatch(aligned);
+  await expandPreviews(aligned);
+  const controlHeights = await aligned.evaluate(() => ['timezone', 'preview-timezone'].map(id =>
+    document.getElementById(id).tomselect.control.getBoundingClientRect().height));
+  assert.equal(controlHeights[0], controlHeights[1]);
+  for (const id of ['timezone', 'preview-timezone']) {
+    const input = aligned.locator(`#${id}-ts-control`);
+    const dropdown = aligned.locator(`#${id}-ts-dropdown`);
+    await input.focus();
+    assert.equal(await dropdown.isVisible(), false, 'Focus must not open a timezone picker');
+    await aligned.keyboard.press('ArrowDown');
+    await dropdown.waitFor();
+    await aligned.keyboard.press('Escape');
+    await dropdown.waitFor({ state: 'hidden' });
+    await input.locator('..').click();
+    await dropdown.waitFor();
+    await input.fill('Tokyo');
+    await aligned.locator(`#${id}-ts-dropdown .active[data-value="Asia/Tokyo"]`).waitFor();
+    await aligned.keyboard.press('Enter');
+    assert.equal(await aligned.locator(`#${id}`).inputValue(), 'Asia/Tokyo');
+    if (id === 'timezone') {
+      assert.equal(new URLSearchParams(new URL(aligned.url()).hash.slice(1)).get('tz'), 'Asia/Tokyo');
+    } else {
+      assert.equal(await aligned.locator('#timezone-previews li').count(), 0);
+      assert.equal(new URLSearchParams(new URL(aligned.url()).hash.slice(1)).has('preview'), false);
+      await aligned.locator('#add-timezone').click();
+      assert.equal(await aligned.locator('#timezone-previews li').count(), 1);
+    }
+    await assertTimezoneOptionsMatch(aligned);
+  }
+  await aligned.context().close();
 
   // Optional enhancement failure must leave usable native selects.
   const fallback = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
@@ -243,6 +325,16 @@ try {
   await fallback.locator('#period').selectOption('0');
   await fallback.locator('#hour-format').selectOption('24');
   assert.equal(await fallback.locator('#local-time').innerText(), '11:45');
+
+  await expandPreviews(fallback);
+  await fallback.locator('#add-timezone').click();
+  assert.match(await fallback.locator('#preview-status').innerText(), /Choose a timezone/);
+  assert.equal(await fallback.locator('#preview-add-form').isVisible(), true);
+  await fallback.locator('#preview-timezone optgroup').first().waitFor({ state: 'attached' });
+  await fallback.locator('#preview-timezone').selectOption('Asia/Tokyo');
+  assert.equal(await fallback.locator('#timezone-previews li').count(), 0);
+  await fallback.locator('#add-timezone').click();
+  assert.equal(await fallback.locator('#timezone-previews li').count(), 1);
   await fallback.context().close();
   await pickers.context().close();
 
@@ -380,6 +472,214 @@ try {
   await choose(sender, 'hour-format', '24');
   assert.equal(await sender.locator('#date').inputValue(), '');
   assert.equal(await sender.locator('#copy').isDisabled(), true);
+  const previews = await newPage({ timezoneId: 'UTC', locale: 'en-GB', viewport: { width: 375, height: 812 } });
+  const storageKey = 'meettime.preview-timezones';
+  await previews.addInitScript(() => {
+    window.storageWrites = 0;
+    for (const name of ['setItem', 'removeItem', 'clear']) {
+      const original = Storage.prototype[name];
+      Storage.prototype[name] = function (...args) {
+        window.storageWrites++;
+        return original.apply(this, args);
+      };
+    }
+  });
+  const savedZones = () => previews.evaluate(key => localStorage.getItem(key), storageKey);
+  const previewTimes = () => previews.locator('#timezone-previews time').allTextContents();
+  async function addPreview(zone) {
+    await expandPreviews(previews);
+    await previews.waitForFunction(() => Boolean(document.getElementById('preview-timezone').tomselect));
+    await choose(previews, 'preview-timezone', zone);
+    await previews.locator('#add-timezone').click();
+  }
+  await previews.goto(base);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#other-timezones').isVisible(), true);
+  assert.equal(await previews.getByRole('tab').count(), 0);
+  assert.equal(await previews.locator('#result').isVisible(), true);
+  assert.equal(await previews.locator('#other-timezones').evaluate(el => el.open), false);
+  assert.equal(await previews.locator('#preview-add-form').isVisible(), false);
+  assert.equal(await previews.locator('#preview-timezone-ts-dropdown').isVisible(), false);
+  const untouchedLink = previews.url();
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await previews.locator('#other-timezones > summary').focus();
+  await previews.keyboard.press('Space');
+  assert.equal(await previews.locator('#preview-add-form').isVisible(), true);
+  assert.equal(await previews.locator('#local-time').isVisible(), true);
+  await previews.keyboard.press('Space');
+  assert.equal(await previews.locator('#preview-add-form').isVisible(), false);
+  await expandPreviews(previews);
+  const emptySearch = previews.getByRole('combobox', { name: 'Add timezone', exact: true });
+  assert.equal(await emptySearch.getAttribute('aria-expanded'), 'false');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await previews.locator('#add-timezone').click();
+    assert.equal(await previews.locator('#preview-add-form').isVisible(), true);
+    assert.equal(await emptySearch.getAttribute('aria-expanded'), 'false');
+    assert.equal(await emptySearch.getAttribute('aria-invalid'), 'true');
+    assert.match(await previews.locator('#preview-status').innerText(), /Choose a timezone/);
+    assert.equal(await previews.evaluate(() => document.activeElement.id), 'preview-timezone-ts-control');
+  }
+  await emptySearch.click();
+  await previews.locator('#preview-timezone-ts-dropdown').waitFor();
+  await emptySearch.fill('Tokyo');
+  await previews.locator('#add-timezone').click();
+  assert.match(await previews.locator('#preview-status').innerText(), /Choose a timezone/);
+  assert.equal(await previews.locator('#preview-timezone').inputValue(), '');
+  assert.equal(await emptySearch.getAttribute('aria-expanded'), 'false');
+  await emptySearch.click();
+  await emptySearch.fill('Tokyo');
+  await previews.locator('#preview-timezone-ts-dropdown .active[data-value="Asia/Tokyo"]').waitFor();
+  await previews.keyboard.press('Enter');
+  assert.equal(await emptySearch.getAttribute('aria-expanded'), 'false');
+  assert.equal(await emptySearch.getAttribute('aria-invalid'), 'false');
+  assert.equal(await previews.locator('#timezone-previews li').count(), 0);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  assert.equal(previews.url(), untouchedLink);
+
+  await setFields(previews, '2026-07-15', '23', '30', 'UTC', '24');
+  const prominentTimeSize = await previews.locator('#local-time').evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+  assert.equal((await previews.locator('#local-time').boundingBox()).x, (await previews.locator('#local-zone').boundingBox()).x);
+  await addPreview('Asia/Tokyo');
+  await addPreview('America/Los_Angeles');
+  assert.deepEqual(await previewTimes(), ['8:30', '16:30']);
+  assert.equal(await previews.locator('#result').isVisible(), true);
+  assert.equal(await previews.locator('#local-time').innerText(), '23:30');
+  assert.match(await previews.locator('#local-date').innerText(), /Wednesday, 15 July 2026/);
+  assert.equal(await previews.locator('#preview-count').textContent(), ' · 2');
+  const localRow = await previews.locator('#result').boundingBox();
+  const firstComparison = await previews.locator('#timezone-previews li').first().boundingBox();
+  assert.ok(localRow.y + localRow.height <= firstComparison.y);
+  assert.equal(await previews.locator('#local-time').evaluate(el => parseFloat(getComputedStyle(el).fontSize)), prominentTimeSize);
+  const writesBeforeDuplicate = await previews.evaluate(() => window.storageWrites);
+  await addPreview('Asia/Tokyo');
+  assert.equal(await previews.locator('#timezone-previews li').count(), 2);
+  assert.equal(await previews.evaluate(() => window.storageWrites), writesBeforeDuplicate);
+  assert.match(await previews.locator('#preview-status').innerText(), /already/);
+  assert.match(await previews.locator('.preview-date').first().innerText(), /Thu, 16 Jul 2026/);
+  assert.match(await previews.locator('#timezone-previews .local-zone').first().innerText(), /GMT\+09:00/);
+  assert.deepEqual(JSON.parse(await savedZones()), ['Asia/Tokyo', 'America/Los_Angeles']);
+  const previewLink = await previews.locator('#share-url').inputValue();
+  assert.deepEqual(new URLSearchParams(new URL(previewLink).hash.slice(1)).getAll('preview'), ['Asia/Tokyo', 'America/Los_Angeles']);
+  assert.equal(await previews.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await choose(previews, 'preview-timezone', '');
+  await emptySearch.click();
+  await previews.locator('#preview-timezone-ts-dropdown').waitFor();
+  await previews.locator('#other-timezones > summary').click();
+  await previews.locator('#preview-timezone-ts-dropdown').waitFor({ state: 'hidden' });
+  assert.equal(await previews.locator('#preview-add-form').isVisible(), false);
+  assert.equal(await previews.locator('#local-time').evaluate(el => parseFloat(getComputedStyle(el).fontSize)), prominentTimeSize);
+  await expandPreviews(previews);
+  assert.equal(await previews.locator('#preview-timezone-ts-dropdown').isVisible(), false);
+  await previews.screenshot({ path: join(tmpdir(), 'meet-time-previews-mobile.png'), fullPage: true });
+  const previewDesktop = await newPage({ timezoneId: 'UTC', locale: 'en-GB', viewport: { width: 1280, height: 1200 } });
+  await previewDesktop.goto(previewLink);
+  await previewDesktop.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previewDesktop.locator('#preview-add-form').isVisible(), false);
+  await expandPreviews(previewDesktop);
+  await previewDesktop.screenshot({ path: join(tmpdir(), 'meet-time-previews-desktop.png'), fullPage: true });
+  await previewDesktop.context().close();
+  await previews.setViewportSize({ width: 320, height: 812 });
+  assert.equal(await previews.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await previews.goto(base);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#other-timezones').isVisible(), true);
+  assert.equal(await previews.locator('#timezone-previews li').count(), 2);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await previews.goto(link);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#timezone-previews li').count(), 0);
+  await choose(previews, 'minute', '45');
+  await previews.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async () => {} } }));
+  await previews.locator('#copy').click();
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  assert.deepEqual(JSON.parse(await savedZones()), ['Asia/Tokyo', 'America/Los_Angeles']);
+  await previews.evaluate(hash => { location.hash = hash; }, new URL(previewLink).hash);
+  await previews.locator('#timezone-previews li').first().waitFor({ state: 'attached' });
+  assert.equal(await previews.locator('#other-timezones').evaluate(el => el.open), false);
+  await expandPreviews(previews);
+  assert.equal(await previews.locator('#other-timezones').isVisible(), true);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await choose(previews, 'hour-format', '12');
+  assert.deepEqual(await previewTimes(), ['8:30 am', '4:30 pm']);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await previews.getByRole('button', { name: 'Remove Asia / Tokyo', exact: true }).click();
+  assert.deepEqual(JSON.parse(await savedZones()), ['America/Los_Angeles']);
+  assert.equal(await previews.evaluate(() => document.activeElement.getAttribute('aria-label')), 'Remove America / Los Angeles');
+  await previews.evaluate(() => localStorage.setItem('unrelated', 'keep'));
+  await previews.getByRole('button', { name: 'Reset timezones', exact: true }).click();
+  assert.equal(await savedZones(), null);
+  assert.equal(await previews.evaluate(() => localStorage.getItem('unrelated')), 'keep');
+  assert.equal(await previews.locator('#timezone-previews li').count(), 0);
+  assert.equal(await previews.locator('#local-time').evaluate(el => parseFloat(getComputedStyle(el).fontSize)), prominentTimeSize);
+  assert.equal(await previews.locator('#local-time').isVisible(), true);
+  assert.equal(new URL(previews.url()).hash.includes('preview='), false);
+  assert.equal(new URLSearchParams(new URL(previews.url()).hash.slice(1)).get('at'), '2026-07-15T23:30:00.000Z');
+  await previews.evaluate(key => localStorage.setItem(key, '{broken'), storageKey);
+  await previews.goto(base);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#timezone-previews li').count(), 0);
+  const multiExample = skill.match(/^https:\/\/meettime\.at\/#\S+$/gm)[1];
+  assert.ok(multiExample, 'Agent skill must include a multi-timezone example');
+  await previews.goto(base + new URL(multiExample).hash);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.deepEqual(await previewTimes(), ['10:30', '23:30']);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await previews.goto(link + '&preview=Not%2FA_Zone');
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#other-timezones').isVisible(), true);
+  await expandPreviews(previews);
+  assert.match(await previews.locator('#preview-status').innerText(), /omitted/);
+  assert.equal(await previews.evaluate(() => window.storageWrites), 0);
+  await previews.goto(previewLink + '&preview=Not%2FA_Zone&preview=US%2FPacific');
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#timezone-previews li').count(), 2);
+  await expandPreviews(previews);
+  assert.match(await previews.locator('#preview-status').innerText(), /omitted/);
+  await previews.goto(repeatedLink + '&preview=UTC');
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.deepEqual(await previewTimes(), ['6:30 am']);
+  await addPreview('Asia/Katmandu');
+  assert.deepEqual(await previewTimes(), ['6:30 am', '12:15 pm']);
+  assert.equal(new URLSearchParams(new URL(previews.url()).hash.slice(1)).get('at'), '2026-11-01T06:30:00.000Z');
+  await previews.goto(base + '#at=2026-03-08T07%3A30%3A00.000Z&tz=UTC&format=24&preview=America%2FNew_York');
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.deepEqual(await previewTimes(), ['3:30']);
+  await expandPreviews(previews);
+  assert.match(await previews.locator('#timezone-previews .local-zone').innerText(), /GMT-04:00/);
+  const limitHash = new URL(previewLink);
+  for (const zone of Intl.supportedValuesOf('timeZone').slice(0, 20)) limitHash.hash += '&preview=' + encodeURIComponent(zone);
+  await previews.goto(limitHash.href);
+  await previews.locator('#copy:not([disabled])').waitFor();
+  assert.equal(await previews.locator('#timezone-previews li').count(), 10);
+  assert.equal(await previews.locator('#other-timezones').isVisible(), true);
+  await previews.setViewportSize({ width: 375, height: 812 });
+  assert.equal(await previews.locator('#result').isVisible(), true);
+  assert.equal(await previews.locator('#local-time').evaluate(el => parseFloat(getComputedStyle(el).fontSize)), prominentTimeSize);
+  assert.equal(await previews.locator('#other-timezones').evaluate(el => el.open), false);
+  await expandPreviews(previews);
+  assert.equal(await previews.locator('#add-timezone').isDisabled(), true);
+  assert.equal(await previews.locator('#preview-timezone').isDisabled(), true);
+  await previews.locator('#timezone-previews button').last().click();
+  assert.equal(await previews.locator('#preview-timezone').isDisabled(), false);
+  await previews.context().close();
+
+  const noStorage = await newPage({ timezoneId: 'UTC', locale: 'en-GB' });
+  await noStorage.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('Blocked', 'SecurityError'); } });
+  });
+  await noStorage.goto(base);
+  await noStorage.locator('#copy:not([disabled])').waitFor();
+  await expandPreviews(noStorage);
+  await noStorage.waitForFunction(() => Boolean(document.getElementById('preview-timezone').tomselect));
+  await choose(noStorage, 'preview-timezone', 'Asia/Tokyo');
+  await noStorage.locator('#add-timezone').click();
+  assert.equal(await noStorage.locator('#timezone-previews li').count(), 1);
+  assert.match(await noStorage.locator('#preview-status').innerText(), /couldn't save/);
+  assert.equal(await noStorage.locator('#copy').isEnabled(), true);
+  await noStorage.getByRole('button', { name: 'Reset timezones', exact: true }).click();
+  assert.equal(await noStorage.locator('#timezone-previews li').count(), 0);
+  await noStorage.context().close();
+
   const analytics = await newPage({ timezoneId: 'UTC', locale: 'en-US' });
   await analytics.route(/^https?:\/\/(meettime\.at|localhost|127\.0\.0\.1|\[::1\]|example\.com)(:\d+)?\//, async route => {
     const url = new URL(route.request().url());
@@ -520,6 +820,42 @@ try {
   await analytics.goto('https://example.com/?analytics=1');
   await analytics.locator('#copy:not([disabled])').waitFor();
   assert.equal(await analytics.locator('script[src*="e.meettime.at"]').count(), 0);
+  await analytics.goto('https://meettime.at/' + new URL(previewLink).hash);
+  await analytics.locator('#copy:not([disabled])').waitFor();
+  await analytics.waitForFunction(() => window.analyticsEvents?.length === 2);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents[1].properties.preview_count), 2);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.some(event => event.event === 'timezone_preview_opened')), false);
+  await expandPreviews(analytics);
+  await analytics.waitForFunction(() => window.analyticsEvents.at(-1).event === 'timezone_preview_opened');
+  assert.equal(await analytics.locator('#preview-timezone-ts-dropdown').isVisible(), false);
+  assert.deepEqual(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.source), 'link');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).event), 'timezone_preview_opened');
+  await analytics.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+    writeText: () => new Promise(resolve => { window.finishPreviewCopy = resolve; }),
+  } }));
+  await analytics.locator('#copy').click();
+  await analytics.waitForFunction(() => typeof window.finishPreviewCopy === 'function');
+  await analytics.getByRole('button', { name: 'Reset timezones', exact: true }).click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.action), 'reset');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.preview_count), 0);
+  await analytics.evaluate(() => window.finishPreviewCopy());
+  await analytics.waitForFunction(() => window.analyticsEvents.at(-1).event === 'link_copied');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.preview_count), 2);
+  const eventsBeforeAdd = await analytics.evaluate(() => window.analyticsEvents.length);
+  await analytics.locator('#add-timezone').click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), eventsBeforeAdd);
+  await choose(analytics, 'preview-timezone', 'Asia/Tokyo');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), eventsBeforeAdd);
+  await analytics.locator('#add-timezone').click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.length), eventsBeforeAdd + 1);
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.action), 'add');
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.preview_count), 1);
+  await analytics.getByRole('button', { name: 'Remove Asia / Tokyo', exact: true }).click();
+  assert.equal(await analytics.evaluate(() => window.analyticsEvents.at(-1).properties.action), 'remove');
+  assert.equal(await analytics.evaluate(() => window.filterEvent({ event: 'timezone_preview_changed', properties: {
+    action: 'add', preview_count: 1, preview_timezones: ['Asia/Tokyo'], search: 'Tokyo', meeting_date: 'secret', source: 'secret',
+  } }).properties.preview_timezones), undefined);
+  assert.equal(await analytics.evaluate(() => window.filterEvent({ event: 'timezone_preview_changed', properties: { search: 'Tokyo' } }).properties.search), undefined);
   await analytics.route('https://e.meettime.at/**', route => route.abort());
   await analytics.goto('https://meettime.at/' + new URL(link).hash);
   await analytics.locator('#copy:not([disabled])').waitFor();
@@ -541,7 +877,7 @@ try {
   assert.equal(await sender.locator('script[src*="e.meettime.at"]').count(), 0);
   await analytics.context().close();
   assert.deepEqual(errors, []);
-  console.log('Passed: analytics events/privacy and blocked SDK, skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
+  console.log('Passed: timezone previews, manual-only preferences, reset, blocked storage, preview analytics/privacy, agent multi-zone links, analytics events/privacy and blocked SDK, skill discovery/checksum and example link, consistent dropdowns, dynamic hour/DST options, responsive sizing, search, native fallback, clock formats, locales, shared links, and clipboard.');
   console.log(`Screenshots saved in ${tmpdir()}`);
 } finally {
   await browser.close();

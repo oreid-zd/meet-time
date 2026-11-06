@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { partsAt, possibleInstants, readSelection, selectionURL } from './time.mjs';
+import { partsAt, possibleInstants, readSelection, selectionURL, normalizePreviewZones, MAX_PREVIEW_ZONES } from './time.mjs';
 
 const cases = [
   ['2026-07-15', '15:30', 'Europe/London', ['2026-07-15T14:30:00.000Z']],
@@ -28,7 +28,7 @@ for (const [date, time, zone, expected] of cases) {
       const link = new URL(selectionURL('https://example.github.io/meet-time/', instant, zone, hourFormat));
       assert.equal(link.pathname, '/meet-time/');
       assert.equal(new URLSearchParams(link.hash.slice(1)).get('format'), hourFormat);
-      assert.deepEqual(readSelection(link.hash), { instant, timeZone: zone, hourFormat });
+      assert.deepEqual(readSelection(link.hash), { instant, timeZone: zone, hourFormat, previewZones: [] });
     }
     assert.deepEqual(partsAt(instant, zone), { date, time, second: '00' });
   }
@@ -54,9 +54,19 @@ for (const hash of [
 
 const meeting = Date.parse('2026-07-15T23:30:00.000Z');
 assert.deepEqual(readSelection('#at=2026-07-15T23:30:00.000Z&tz=UTC'), {
-  instant: meeting, timeZone: 'UTC', hourFormat: '24',
+  instant: meeting, timeZone: 'UTC', hourFormat: '24', previewZones: [],
 });
 assert.equal(readSelection(new URL(selectionURL('https://example.github.io/meet-time/', meeting, 'UTC')).hash).hourFormat, '24');
 assert.deepEqual(partsAt(meeting, 'Asia/Tokyo'), { date: '2026-07-16', time: '08:30', second: '00' });
 assert.deepEqual(partsAt(meeting, 'America/Los_Angeles'), { date: '2026-07-15', time: '16:30', second: '00' });
+assert.deepEqual(normalizePreviewZones(null), []);
+assert.deepEqual(normalizePreviewZones(['US/Eastern', 'America/New_York', 'Not/A_Zone', '', null, '<img>', '+01:00', 'UTC']), ['America/New_York', 'UTC']);
+const manyZones = Intl.supportedValuesOf('timeZone').slice(0, 30);
+assert.equal(normalizePreviewZones(manyZones).length, MAX_PREVIEW_ZONES);
+const previewLink = new URL(selectionURL('https://example.com/', meeting, 'UTC', '12', ['Asia/Tokyo', 'Asia/Kathmandu', 'Asia/Tokyo']));
+assert.deepEqual(readSelection(previewLink.hash).previewZones, normalizePreviewZones(['Asia/Tokyo', 'Asia/Kathmandu']));
+assert.equal(readSelection(previewLink.hash).instant, meeting);
+assert.equal(readSelection(previewLink.hash).hourFormat, '12');
+assert.deepEqual(readSelection(previewLink.hash + '&preview=Not%2FA_Zone').previewZones, readSelection(previewLink.hash).previewZones);
+assert.equal(new URL(selectionURL('https://example.com/', meeting, 'UTC')).hash.includes('preview='), false);
 console.log('Passed: timezone conversions, DST gaps/overlaps, fractional offsets, date boundaries, and URL validation/round trips with 12/24-hour formats and legacy defaults.');
